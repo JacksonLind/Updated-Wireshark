@@ -8,6 +8,17 @@ echo  NetGuard — Network Analyzer ^& IDS — Setup
 echo ============================================================
 echo.
 
+REM ── Smart App Control / Mark-of-the-Web ────────────────────────────────────
+REM Files downloaded from the internet may be blocked by Windows Smart App
+REM Control or Defender SmartScreen.  The line below uses PowerShell's
+REM Unblock-File to remove the Zone.Identifier stream from all scripts in
+REM this folder so they run without prompts.
+echo  [0/3] Unblocking downloaded scripts (removes Mark-of-the-Web)...
+powershell -NoProfile -Command ^
+  "Get-ChildItem -Path '%~dp0' -Include *.bat,*.ps1,*.py -Recurse | Unblock-File -ErrorAction SilentlyContinue"
+echo        Done.
+echo.
+
 REM Check Python
 python --version >nul 2>&1
 if errorlevel 1 (
@@ -40,6 +51,7 @@ echo  Install with "WinPcap API-compatible Mode" enabled.
 echo ============================================================
 echo.
 echo  Setup complete! Run NetGuard with:
-echo    run.bat
+echo    run.bat          (Command Prompt)
+echo    .\run.ps1        (PowerShell — preferred if Smart App Control blocks run.bat)
 echo.
 pause

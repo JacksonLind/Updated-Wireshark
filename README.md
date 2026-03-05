@@ -9,6 +9,7 @@
 | Feature | Details |
 |---|---|
 | **Live Packet Capture** | Real-time capture on any network interface |
+| **Offline File Analysis** | Open `.pcap` / `.pcapng` files from Wireshark or tcpdump |
 | **Protocol Colour Coding** | Instantly identify TCP, UDP, DNS, HTTP, ARP, ICMP at a glance |
 | **Smart Filtering** | Type-to-search filter + BPF syntax support |
 | **Packet Detail View** | Layer-by-layer breakdown with hex dump |
@@ -32,6 +33,7 @@
    ```
    setup.bat
    ```
+   > ⚠️ If Windows **Smart App Control** blocks `setup.bat`, see the [troubleshooting guide](docs/USER_GUIDE.md#smart-app-control-windows-11) or run `python main.py` directly from a terminal.
 4. Launch:
    ```
    run.bat
@@ -83,8 +85,11 @@ See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for:
 .
 ├── main.py              ← Entry point
 ├── requirements.txt     ← Python dependencies
-├── setup.bat / run.bat  ← Windows launchers
+├── setup.bat / run.bat  ← Windows launchers (Command Prompt)
+├── run.ps1              ← Windows launcher (PowerShell — use if Smart App Control blocks .bat)
 ├── setup.sh  / run.sh   ← Linux launchers
+├── samples/
+│   └── sample_capture.pcapng  ← Test file (18 packets: ARP, DNS, HTTP, ICMP, UDP, SSH, IPv6)
 ├── src/
 │   ├── core/
 │   │   ├── capture_engine.py   ← Scapy capture thread

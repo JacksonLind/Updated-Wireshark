@@ -21,6 +21,8 @@ It lets you see every packet flowing across your network, spot suspicious behavi
    ```
    setup.bat
    ```
+   > ⚠️ **Smart App Control / SmartScreen warning?**  
+   > If Windows blocks `setup.bat` with *"Smart App Control blocked a file that may be unsafe"*, see the [Smart App Control](#smart-app-control-windows-11) section below.
 
 4. **Run NetGuard** — double-click `run.bat` or:
    ```
@@ -49,6 +51,7 @@ NetGuard has three main tabs:
 | **Filter** box | Type-to-search across source IP, dest IP, protocol, and port |
 | **Protocol** filter | Quickly narrow to TCP, UDP, HTTP, DNS, etc. |
 | **▶ Start / ■ Stop** | Begin or end a capture session |
+| **📂 Open** | Load packets from a `.pcap` / `.pcapng` file for offline analysis |
 | **Packet table** | Colour-coded list of live packets |
 | **Detail panel** | Click any row to see full layer breakdown + hex dump |
 
@@ -104,7 +107,67 @@ NetGuard automatically monitors for the following threats:
 
 ---
 
-## Saving Captures
+## Opening a Capture File (Offline Analysis)
+
+You can analyse existing `.pcap` or `.pcapng` files without performing a live capture:
+
+1. Click **📂 Open** in the toolbar.
+2. Browse to a `.pcap`, `.pcapng`, or `.cap` file (e.g. one saved by Wireshark or tcpdump).
+3. NetGuard loads all packets, populates the Capture tab, runs the IDS engine, and updates Statistics — exactly as if the packets had been captured live.
+
+> 💡 A ready-made test file is included in the repository:  
+> `samples/sample_capture.pcapng`  
+> It contains 18 packets covering ARP, DNS, HTTP, ICMP, UDP, HTTPS, SSH, and IPv6 — great for exploring the interface without needing a network interface or Npcap.
+
+---
+
+## Smart App Control (Windows 11)
+
+Windows 11 *Smart App Control* (SAC) and *Defender SmartScreen* may block `.bat` and `.ps1` files downloaded from the internet with the message **"Smart App Control blocked a file that may be unsafe"**.  This is a reputation-based check — not a virus detection — and is safe to work around using the steps below.
+
+### Option A — Run `setup.bat` first (recommended)
+
+`setup.bat` includes a step that calls PowerShell's `Unblock-File` to remove the *Mark-of-the-Web* (Zone.Identifier) from all scripts in the project folder.  Once unblocked, `run.bat` will open normally.
+
+If SAC also blocks `setup.bat` itself, use Option B.
+
+### Option B — Unblock manually via File Properties
+
+1. Right-click the blocked file (e.g. `setup.bat`) → **Properties**.
+2. At the bottom of the *General* tab, tick **Unblock**.
+3. Click **OK**, then re-run the file.
+
+### Option C — Use the PowerShell launcher
+
+`run.ps1` runs inside the already-trusted `powershell.exe` process, so it is not subject to the same reputation checks:
+
+1. Open **PowerShell as Administrator** (right-click the Start button → *Windows PowerShell (Admin)*).
+2. Navigate to the project folder:
+   ```powershell
+   cd "C:\path\to\NetGuard"
+   ```
+3. Allow scripts for this session:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   ```
+4. Run:
+   ```powershell
+   .\run.ps1
+   ```
+
+### Option D — Run `python main.py` directly
+
+Open a terminal (Command Prompt or PowerShell) in the project folder and run:
+
+```
+python main.py
+```
+
+Python's interpreter (`python.exe`) is a signed, trusted binary — scripts passed to it are not blocked by Smart App Control.
+
+---
+
+
 
 Click **💾 Save** in the toolbar at any time.  
 Supported formats:
@@ -130,6 +193,9 @@ The **Filter** field in the toolbar accepts standard **Berkeley Packet Filter** 
 
 ## Troubleshooting
 
+### "Smart App Control blocked a file" (Windows 11)
+See the [Smart App Control](#smart-app-control-windows-11) section above.
+
 ### "No interfaces found" or capture won't start (Windows)
 - Make sure **Npcap** is installed.
 - Try running as **Administrator** (right-click → Run as administrator).
@@ -149,8 +215,8 @@ The **Filter** field in the toolbar accepts standard **Berkeley Packet Filter** 
 
 Here are areas where NetGuard can be extended:
 
-### 1. PCAP File Import
-Add `scapy.utils.rdpcap()` to load `.pcap` / `.pcapng` files captured by Wireshark or tcpdump for offline analysis.
+### 1. PCAP File Import ✅ (implemented)
+`scapy.utils.rdpcap()` is used by the **📂 Open** toolbar button to load `.pcap` / `.pcapng` files captured by Wireshark or tcpdump for offline analysis.
 
 ### 2. Machine-Learning Anomaly Detection
 Replace or augment the rule-based IDS with a trained classifier (e.g. using `scikit-learn`) to detect zero-day attacks that don't match known signatures.
