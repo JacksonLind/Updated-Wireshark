@@ -55,6 +55,9 @@ class CaptureEngine:
         """Start capturing packets on *interface* (empty = all interfaces)."""
         if self._running:
             return
+        # Wait briefly for any previous thread to finish before starting a new one.
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=3.0)
         self.interface   = interface
         self.bpf_filter  = bpf_filter
         self.packet_count = 0
@@ -68,13 +71,26 @@ class CaptureEngine:
         self._thread.start()
 
     def stop(self) -> None:
-        """Signal the capture thread to stop and wait for it to exit."""
+        """Signal the capture thread to stop without blocking the caller.
+
+        The capture thread is a daemon and will exit on its own once the
+        stop event is set (at the next packet or when the process ends).
+        Use ``join_thread()`` if you need to wait for a clean shutdown
+        (e.g. on application exit).
+        """
         if not self._running:
             return
         self._stop_evt.set()
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=3.0)
+
+    def join_thread(self, timeout: float = 3.0) -> None:
+        """Block until the capture thread exits (or *timeout* seconds pass).
+
+        Safe to call from any thread; intended for use in ``closeEvent``
+        so the application can exit cleanly.
+        """
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
