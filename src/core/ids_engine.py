@@ -35,6 +35,7 @@ class IDSAlert:
     dst_ip:      str
     description: str
     packet_info: str = ""
+    raw_packet:  dict = field(default_factory=dict)
 
 
 # ── IDS Engine ────────────────────────────────────────────────────────────────

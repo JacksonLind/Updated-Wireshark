@@ -204,9 +204,10 @@ class MainWindow(QMainWindow):
         self._capture_tab.add_packet(info)
         self._stats_tab.record_packet(info)
 
-        # Run IDS
+        # Run IDS — attach the triggering packet so the Alerts tab can show details
         alerts = self._ids.check(info)
         for alert in alerts:
+            alert.raw_packet = info
             self._handle_alert(alert)
 
         count = len(self._captured)
@@ -397,4 +398,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self._running:
             self._engine.stop()
+        # Wait for the capture thread to finish before allowing the app to exit
+        self._engine.join_thread(timeout=3.0)
         event.accept()

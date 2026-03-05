@@ -2,6 +2,7 @@
 IDS Alerts tab for NetGuard.
 
 Real-time table of intrusion-detection alerts, colour-coded by severity.
+Clicking a row opens a full packet-detail panel at the bottom.
 """
 
 from __future__ import annotations
@@ -13,10 +14,11 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QPushButton, QAbstractItemView,
-    QComboBox,
+    QComboBox, QSplitter,
 )
 
 from src.gui.theme import SEVERITY_PALETTE, BG_PANEL, TEXT_DIM, BORDER, ACCENT
+from src.gui.detail_panel import DetailPanel
 from src.core.ids_engine import IDSAlert
 from src.utils.helpers import format_timestamp
 
@@ -32,11 +34,13 @@ COLUMNS = [
 
 
 class AlertsTab(QWidget):
-    """Displays IDS alerts in real-time."""
+    """Displays IDS alerts in real-time with a clickable detail panel."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._alerts: list[IDSAlert] = []
+        # Parallel list that tracks which alert corresponds to each visible row
+        self._visible_alerts: list[IDSAlert] = []
         self._build_ui()
 
     # ── Public API ─────────────────────────────────────────────────────────
@@ -50,8 +54,10 @@ class AlertsTab(QWidget):
 
     def clear(self) -> None:
         self._alerts.clear()
+        self._visible_alerts.clear()
         self._table.setRowCount(0)
         self._count_label.setText("0 alerts")
+        self._detail.clear()
 
     # ── UI ─────────────────────────────────────────────────────────────────
 
@@ -101,6 +107,9 @@ class AlertsTab(QWidget):
 
         outer.addWidget(bar)
 
+        # ── Splitter: alerts table (top) + packet detail (bottom) ──────────
+        splitter = QSplitter(Qt.Vertical)
+
         # Alerts table
         self._table = QTableWidget()
         self._table.setColumnCount(len(COLUMNS))
@@ -111,19 +120,28 @@ class AlertsTab(QWidget):
                 self._table.setColumnWidth(i, w)
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.setShowGrid(False)
         self._table.verticalHeader().setDefaultSectionSize(24)
-
-        # Expand last column
         self._table.horizontalHeader().setStretchLastSection(True)
-        outer.addWidget(self._table, 1)
+        self._table.currentItemChanged.connect(
+            lambda cur, _: self._on_row_selected(cur.row() if cur is not None else -1)
+        )
+        splitter.addWidget(self._table)
+
+        # Packet detail panel
+        self._detail = DetailPanel()
+        splitter.addWidget(self._detail)
+
+        splitter.setSizes([400, 200])
+        outer.addWidget(splitter, 1)
 
         # Bottom info strip
         info_bar = QLabel(
             "  ⚠  Alerts are raised in real-time as suspicious patterns are detected. "
-            "Click a row for details."
+            "Click a row to inspect the triggering packet."
         )
         info_bar.setFixedHeight(26)
         info_bar.setStyleSheet(
@@ -137,6 +155,7 @@ class AlertsTab(QWidget):
     def _append_row(self, alert: IDSAlert) -> None:
         row = self._table.rowCount()
         self._table.insertRow(row)
+        self._visible_alerts.append(alert)
 
         sev_color = QColor(SEVERITY_PALETTE.get(alert.severity, "#ccc"))
 
@@ -167,6 +186,30 @@ class AlertsTab(QWidget):
 
         self._table.scrollToBottom()
 
+    def _on_row_selected(self, row: int) -> None:
+        """Show packet details for the selected alert row."""
+        if 0 <= row < len(self._visible_alerts):
+            alert = self._visible_alerts[row]
+            # If the alert carries the full triggering packet, show it.
+            # Otherwise synthesise a minimal info dict from the alert fields.
+            if alert.raw_packet and 'timestamp' in alert.raw_packet:
+                self._detail.show_packet(alert.raw_packet)
+            else:
+                synthetic = {
+                    "timestamp": alert.timestamp,
+                    "src_ip":    alert.src_ip,
+                    "dst_ip":    alert.dst_ip,
+                    "protocol":  alert.category,
+                    "src_port":  None,
+                    "dst_port":  None,
+                    "length":    0,
+                    "layers":    [],
+                    "flags":     "",
+                    "payload":   b"",
+                    "info":      alert.description,
+                }
+                self._detail.show_packet(synthetic)
+
     def _passes_filter(self, alert: IDSAlert) -> bool:
         sev = self._sev_filter.currentText()
         if sev != "All" and alert.severity != sev:
@@ -178,6 +221,8 @@ class AlertsTab(QWidget):
 
     def _apply_filter(self) -> None:
         self._table.setRowCount(0)
+        self._visible_alerts.clear()
+        self._detail.clear()
         for alert in self._alerts:
             if self._passes_filter(alert):
                 self._append_row(alert)
