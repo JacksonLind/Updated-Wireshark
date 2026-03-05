@@ -110,6 +110,11 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
+        open_action = QAction("📂  Open", self)
+        open_action.setToolTip("Load packets from a .pcap / .pcapng file")
+        open_action.triggered.connect(self._open_capture_file)
+        toolbar.addAction(open_action)
+
         save_action = QAction("💾  Save", self)
         save_action.setToolTip("Export captured packets to CSV or JSON")
         save_action.triggered.connect(self._save_capture)
@@ -266,6 +271,58 @@ class MainWindow(QMainWindow):
         elapsed = int(time.time() - self._start_time)
         m, s = divmod(elapsed, 60)
         self._elapsed_label.setText(f"  {m:02d}:{s:02d}")
+
+    # ── Open capture file ────────────────────────────────────────────────────
+
+    def _open_capture_file(self) -> None:
+        """Load packets from a .pcap or .pcapng file for offline analysis."""
+        if self._running:
+            QMessageBox.warning(
+                self,
+                "Capture in progress",
+                "Stop the live capture before loading a file.",
+            )
+            return
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Capture File",
+            str(Path.home()),
+            "Capture Files (*.pcap *.pcapng *.cap);;All Files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            from scapy.all import rdpcap
+            from src.core.analyzer import analyze_packet
+
+            self._ids.reset()
+            self._captured.clear()
+            self._capture_tab.clear()
+            self._alerts_tab.clear()
+            self._stats_tab.reset()
+
+            raw_packets = rdpcap(path)
+            for pkt in raw_packets:
+                info = analyze_packet(pkt)
+                self._captured.append(info)
+                self._capture_tab.add_packet(info)
+                self._stats_tab.record_packet(info)
+                for alert in self._ids.check(info):
+                    self._handle_alert(alert)
+
+            count = len(self._captured)
+            self._pkt_counter.setText(f"Packets: {count:,}")
+            self._status(
+                f"Loaded {count:,} packet{'s' if count != 1 else ''} from {Path(path).name}"
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Open Error",
+                f"<b>Could not load capture file:</b><br><br>{exc}",
+            )
 
     # ── Save capture ────────────────────────────────────────────────────────
 
