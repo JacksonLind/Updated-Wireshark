@@ -34,7 +34,7 @@ def analyze_packet(pkt) -> dict[str, Any]:
     tcp_flags   dict    individual flag booleans (SYN/ACK/RST/FIN/PSH/URG)
     """
     result: dict[str, Any] = {
-        "timestamp":   getattr(pkt, "time", 0.0),
+        "timestamp":   float(getattr(pkt, "time", 0.0)),
         "src_ip":      "",
         "dst_ip":      "",
         "src_mac":     "",
