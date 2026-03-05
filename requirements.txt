@@ -1,0 +1,11 @@
+# NetGuard dependencies
+# Install with:  pip install -r requirements.txt
+
+# GUI framework
+PyQt5>=5.15.0
+
+# Packet capture & analysis
+scapy>=2.5.0
+
+# Optional: faster packet processing (recommended on Windows)
+# pywin32>=306  ; sys_platform == "win32"
