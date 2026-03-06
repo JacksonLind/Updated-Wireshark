@@ -1,7 +1,8 @@
 """
 Statistics / Dashboard tab for NetGuard.
 
-Shows live counters, protocol distribution, top talkers, and threat summary.
+Shows live counters, protocol distribution, top talkers, threat summary,
+and a real-time scrolling bandwidth / packet-rate chart.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from PyQt5.QtWidgets import (
 )
 
 from src.gui.theme import ACCENT, BG_PANEL, TEXT_DIM, BORDER, SEVERITY_PALETTE, PROTO_PALETTE, BG_DARK
+from src.gui.bandwidth_chart import BandwidthChart
 
 
 class _StatCard(QFrame):
@@ -106,6 +108,10 @@ class StatsTab(QWidget):
         self._total_bytes   = 0
         self._alerts_total  = 0
 
+        # Bandwidth-chart tracking
+        self._last_bytes:   int = 0
+        self._last_pkts:    int = 0
+
         self._build_ui()
 
         # Refresh the UI every second to avoid per-packet redraws
@@ -137,6 +143,9 @@ class StatsTab(QWidget):
         self._total = 0
         self._total_bytes = 0
         self._alerts_total = 0
+        self._last_bytes = 0
+        self._last_pkts = 0
+        self._bw_chart.reset()
         self._refresh()
 
     # ── UI ─────────────────────────────────────────────────────────────────
@@ -159,6 +168,14 @@ class StatsTab(QWidget):
             cards_row.addWidget(card)
         cards_row.addStretch()
         main_layout.addLayout(cards_row)
+
+        # ── Live bandwidth chart ────────────────────────────────────────────
+        bw_group = QGroupBox("Live Traffic  (last 60 s)")
+        bw_layout = QVBoxLayout(bw_group)
+        bw_layout.setContentsMargins(6, 8, 6, 6)
+        self._bw_chart = BandwidthChart()
+        bw_layout.addWidget(self._bw_chart)
+        main_layout.addWidget(bw_group)
 
         # ── Middle row: protocol bars + top talkers ─────────────────────────
         mid = QHBoxLayout()
@@ -253,6 +270,13 @@ class StatsTab(QWidget):
         self._card_bytes.set_value(format_bytes(self._total_bytes))
         self._card_alerts.set_value(self._alerts_total)
         self._card_critical.set_value(self._alert_counts.get("CRITICAL", 0))
+
+        # Bandwidth chart sample (bytes delta + packets delta since last tick)
+        bps = self._total_bytes - self._last_bytes
+        pps = self._total - self._last_pkts
+        self._last_bytes = self._total_bytes
+        self._last_pkts  = self._total
+        self._bw_chart.push_sample(float(bps), float(pps))
 
         # Protocol bars
         total = max(self._total, 1)

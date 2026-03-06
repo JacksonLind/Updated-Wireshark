@@ -2,7 +2,7 @@
 Connections tab for NetGuard.
 
 Displays active TCP/UDP flows tracked in real-time, with protocol
-and state filters.
+and state filters, GeoIP classification, and hostname resolution.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import (
 from src.gui.theme import PROTO_PALETTE, BG_PANEL, TEXT_DIM, BORDER, ACCENT
 from src.core.connections import Connection, TRACKED_PROTOCOLS
 from src.utils.helpers import format_bytes
+from src.utils import geoip
 
 _DNS_TIMEOUT = 2.0        # seconds per reverse-DNS lookup
 _DNS_MAX_WORKERS = 8      # maximum concurrent DNS threads
@@ -42,6 +43,7 @@ COLUMNS = [
     ("Packets",   70,  Qt.AlignRight),
     ("Data",      80,  Qt.AlignRight),
     ("Duration",  80,  Qt.AlignRight),
+    ("Type",      90,  Qt.AlignCenter),
 ]
 
 STATE_COLORS = {
@@ -51,6 +53,17 @@ STATE_COLORS = {
     "CLOSING":     "#FF8800",
     "RESET":       "#FF4444",
     "UDP":         "#81c784",
+}
+
+_TYPE_COLORS = {
+    "Private":   "#81c784",
+    "Public":    "#4fc3f7",
+    "Loopback":  "#ce93d8",
+    "Link-Local":"#ffb74d",
+    "Multicast": "#f48fb1",
+    "Broadcast": "#FF8800",
+    "Special":   "#9e9e9e",
+    "Unknown":   "#9e9e9e",
 }
 
 
@@ -192,6 +205,15 @@ class ConnectionsTab(QWidget):
             src_display = self._display_ip(conn.src_ip, self._dns_cache.get(conn.src_ip, ""))
             dst_display = self._display_ip(conn.dst_ip, self._dns_cache.get(conn.dst_ip, ""))
 
+            # IP classification (use dst for external traffic indicator)
+            dst_cls = geoip.classify_ip(conn.dst_ip)
+            src_cls = geoip.classify_ip(conn.src_ip)
+            # Show dst classification if public, else src
+            cls = dst_cls if dst_cls == "Public" else src_cls
+            cls_icon = geoip.ip_icon(conn.dst_ip)
+            type_label = f"{cls_icon} {cls}"
+            type_color = QColor(_TYPE_COLORS.get(cls, TEXT_DIM))
+
             values = [
                 conn.protocol,
                 src_display,
@@ -202,6 +224,7 @@ class ConnectionsTab(QWidget):
                 f"{conn.packets:,}",
                 format_bytes(conn.bytes_total),
                 dur_str,
+                type_label,
             ]
             aligns = [c[2] for c in COLUMNS]
 
@@ -226,6 +249,12 @@ class ConnectionsTab(QWidget):
                     f = QFont()
                     f.setBold(True)
                     item.setFont(f)
+                elif col == 9:
+                    item.setForeground(type_color)
+                    item.setToolTip(
+                        f"Src: {geoip.ip_badge(conn.src_ip)}\n"
+                        f"Dst: {geoip.ip_badge(conn.dst_ip)}"
+                    )
                 else:
                     item.setForeground(QColor("#e0e0e0"))
                 self._table.setItem(row, col, item)
@@ -318,7 +347,9 @@ class ConnectionsTab(QWidget):
             ("Protocol",    conn.protocol),
             ("State",       conn.state),
             ("Source",      f"{src_text}  :  {conn.src_port or '—'}"),
+            ("Src Type",    geoip.ip_badge(conn.src_ip)),
             ("Destination", f"{dst_text}  :  {conn.dst_port or '—'}"),
+            ("Dst Type",    geoip.ip_badge(conn.dst_ip)),
             ("Packets",     f"{conn.packets:,}"),
             ("Data",        format_bytes(conn.bytes_total)),
             ("Duration",    dur_str),
