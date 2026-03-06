@@ -31,8 +31,10 @@ from src.gui.theme       import ACCENT, BG_PANEL, BORDER, TEXT_DIM, BG_DARK
 from src.core.capture_engine import CaptureEngine, list_interfaces
 from src.core.ids_engine     import IDSEngine, IDSAlert
 from src.core.connections    import ConnectionTracker
+from src.core.stream_reassembler import StreamReassembler
 from src.utils.helpers       import format_timestamp
 from src.utils.resources     import resource_path
+from src.utils               import geoip
 
 
 # ── Qt-safe bridge: capture thread → main thread ─────────────────────────────
@@ -47,7 +49,7 @@ class MainWindow(QMainWindow):
     """NetGuard main application window."""
 
     APP_NAME = "NetGuard"
-    VERSION  = "1.0.0"
+    VERSION  = "2.0.0"
 
     def __init__(self):
         super().__init__()
@@ -58,6 +60,7 @@ class MainWindow(QMainWindow):
         )
         self._ids      = IDSEngine(alert_callback=self._on_alert_raised)
         self._conn_tracker = ConnectionTracker()
+        self._stream_reassembler = StreamReassembler()
         self._captured: list[dict] = []
         self._running   = False
         self._pkt_rate_count: int = 0   # packets since last rate tick
@@ -67,7 +70,7 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._status("Ready — select an interface and press  ▶  Start")
         self.setWindowTitle(f"{self.APP_NAME}  {self.VERSION}")
-        self.resize(1280, 800)
+        self.resize(1400, 860)
 
     # ── UI ──────────────────────────────────────────────────────────────────
 
@@ -149,6 +152,9 @@ class MainWindow(QMainWindow):
         self._stats_tab   = StatsTab()
         self._conn_tab    = ConnectionsTab()
 
+        # Inject stream reassembler so capture tab can open stream viewers
+        self._capture_tab.set_stream_reassembler(self._stream_reassembler)
+
         self._tabs.addTab(self._capture_tab, "📡  Capture")
         self._tabs.addTab(self._alerts_tab,  "🚨  IDS Alerts")
         self._tabs.addTab(self._stats_tab,   "📊  Statistics")
@@ -226,6 +232,7 @@ class MainWindow(QMainWindow):
         self._capture_tab.add_packet(info)
         self._stats_tab.record_packet(info)
         self._conn_tracker.process(info)
+        self._stream_reassembler.process(info)
         self._pkt_rate_count += 1
 
         # Run IDS — attach the triggering packet so the Alerts tab can show details
@@ -269,6 +276,7 @@ class MainWindow(QMainWindow):
 
         self._ids.reset()
         self._conn_tracker.reset()
+        self._stream_reassembler.reset()
         self._captured.clear()
         self._pkt_rate_count = 0
         self._capture_tab.clear()
@@ -342,6 +350,7 @@ class MainWindow(QMainWindow):
 
             self._ids.reset()
             self._conn_tracker.reset()
+            self._stream_reassembler.reset()
             self._captured.clear()
             self._capture_tab.clear()
             self._alerts_tab.clear()
@@ -355,6 +364,7 @@ class MainWindow(QMainWindow):
                 self._capture_tab.add_packet(info)
                 self._stats_tab.record_packet(info)
                 self._conn_tracker.process(info)
+                self._stream_reassembler.process(info)
                 for alert in self._ids.check(info):
                     self._handle_alert(alert)
 
