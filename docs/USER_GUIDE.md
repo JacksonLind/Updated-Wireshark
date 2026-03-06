@@ -130,7 +130,8 @@ Live dashboard showing:
 - Total packets captured and data volume
 - Total IDS alerts and critical count
 - Protocol distribution (bar chart)
-- Top 10 most active source IPs
+- Top 10 most active source IPs (Top Talkers)
+- Top 10 most targeted destination IPs (Top Destinations)
 - Alert breakdown by severity
 
 ### 🔗 Connections Tab
@@ -155,11 +156,14 @@ NetGuard automatically monitors for the following threats:
 | **Port Scan** | ≥ 15 distinct destination ports from one IP in 10 s | HIGH |
 | **SYN Flood** | ≥ 50 SYN-only packets from one IP in 5 s | CRITICAL |
 | **ICMP Flood** | ≥ 30 ICMP echo-requests from one IP in 5 s | HIGH |
+| **UDP Flood** | ≥ 100 UDP packets from one IP in 5 s | HIGH |
 | **ARP Spoofing** | Same IP announced by two or more MAC addresses | CRITICAL |
 | **DNS Tunneling** | DNS query name longer than 80 characters | HIGH |
 | **Brute Force** | ≥ 20 connection attempts to SSH/RDP/FTP in 30 s | CRITICAL |
+| **HTTP Brute Force** | ≥ 20 HTTP POST requests from one IP in 30 s | CRITICAL |
 | **NULL Scan** | TCP packet with no flags set | HIGH |
 | **XMAS Scan** | TCP packet with FIN + PSH + URG flags set | HIGH |
+| **FIN Scan** | TCP packet with only the FIN flag set | HIGH |
 | **Large Packet** | Single packet exceeding 9000 bytes | LOW |
 | **SQL Injection** | SQL keywords detected in HTTP payload | CRITICAL |
 | **XSS Attempt** | Script/event-handler patterns in HTTP payload | HIGH |

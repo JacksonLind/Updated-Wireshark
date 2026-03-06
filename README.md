@@ -13,7 +13,7 @@
 | **Protocol Colour Coding** | Instantly identify TCP, UDP, DNS, HTTP, ARP, ICMP at a glance |
 | **Smart Filtering** | Type-to-search filter + BPF syntax support |
 | **Packet Detail View** | Layer-by-layer breakdown with hex dump |
-| **Built-in IDS** | 11 detection rules: port scans, SYN floods, ARP spoofing, brute force, SQL injection & more |
+| **Built-in IDS** | 14 detection rules: port scans, SYN/UDP floods, ARP spoofing, brute force, SQL injection & more |
 | **Live Dashboard** | Real-time statistics, top talkers, protocol distribution, alert breakdown |
 | **Connection Tracker** | Live view of active TCP/UDP flows with state and duration |
 | **Export** | Save captures as CSV, JSON, or PCAP; export alerts to CSV or JSON |
@@ -111,11 +111,14 @@ NetGuard monitors traffic in real time for:
 | Port Scan | HIGH |
 | SYN Flood | CRITICAL |
 | ICMP Flood | HIGH |
+| UDP Flood | HIGH |
 | ARP Spoofing | CRITICAL |
 | DNS Tunneling | HIGH |
 | Brute Force (SSH, RDP, FTP) | CRITICAL |
+| HTTP Brute Force | CRITICAL |
 | NULL Scan | HIGH |
 | XMAS Scan | HIGH |
+| FIN Scan | HIGH |
 | Large Packet (> 9000 B) | LOW |
 | SQL Injection in HTTP | CRITICAL |
 | XSS Attempt in HTTP | HIGH |

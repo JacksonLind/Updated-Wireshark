@@ -90,8 +90,9 @@ class AlertsTab(QWidget):
         bar_layout.addWidget(QLabel("Category:"))
         self._cat_filter = QComboBox()
         self._cat_filter.addItems([
-            "All", "Port Scan", "SYN Flood", "ICMP Flood", "ARP Spoofing",
-            "DNS Tunneling", "Brute Force", "NULL Scan", "XMAS Scan",
+            "All", "Port Scan", "SYN Flood", "ICMP Flood", "UDP Flood",
+            "ARP Spoofing", "DNS Tunneling", "Brute Force", "HTTP Brute Force",
+            "NULL Scan", "XMAS Scan", "FIN Scan",
             "Large Packet", "SQL Injection", "XSS Attempt",
         ])
         self._cat_filter.currentTextChanged.connect(self._apply_filter)
@@ -170,6 +171,16 @@ class AlertsTab(QWidget):
 
         sev_color = QColor(SEVERITY_PALETTE.get(alert.severity, "#ccc"))
 
+        # Dim tint colors for row background by severity
+        _SEV_ROW_BG = {
+            "CRITICAL": "#2d1010",
+            "HIGH":     "#2d1d08",
+            "MEDIUM":   "#2d2b08",
+            "LOW":      "#08182d",
+            "INFO":     "#0a1f0a",
+        }
+        row_bg = QColor(_SEV_ROW_BG.get(alert.severity, BG_PANEL))
+
         values = [
             str(alert.alert_id),
             format_timestamp(alert.timestamp),
@@ -184,6 +195,7 @@ class AlertsTab(QWidget):
         for col, (val, align) in enumerate(zip(values, aligns)):
             item = QTableWidgetItem(val)
             item.setTextAlignment(align | Qt.AlignVCenter)
+            item.setBackground(row_bg)
             if col == 2:  # Severity badge
                 item.setForeground(sev_color)
                 f = QFont()
