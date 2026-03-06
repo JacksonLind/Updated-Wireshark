@@ -9,7 +9,27 @@ It lets you see every packet flowing across your network, spot suspicious behavi
 
 ## Quick Start
 
-### Windows 11
+### Option A — Standalone Executable (recommended)
+
+> No Python needed on the target machine — just the exe and Npcap.
+
+1. **Install Npcap** from [npcap.com](https://npcap.com/#download).  
+   ✅ During install, tick **"Install Npcap in WinPcap API-compatible Mode"**.
+
+2. **Build the exe** — double-click `build.bat` (requires Python on the **build** machine):
+   ```
+   build.bat
+   ```
+   This produces `dist\NetGuard\NetGuard.exe`.
+
+3. **Run `NetGuard.exe`** — right-click → **Run as Administrator** for packet capture.
+
+4. **Distribute** — copy the entire `dist\NetGuard\` folder to any Windows machine.  
+   The only requirement on the target is Npcap.
+
+### Option B — Run from Source (Python)
+
+#### Windows 11
 
 1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/).  
    ✅ During install, tick **"Add Python to PATH"**.
@@ -39,9 +59,35 @@ sudo python3 main.py   # root required for raw packet capture
 
 ---
 
+## Building the Standalone Executable
+
+### Windows
+
+```bat
+build.bat
+```
+
+The script automatically:
+- Installs **PyInstaller** if not already present
+- Installs all Python dependencies
+- Runs PyInstaller using `NetGuard.spec`
+- Produces `dist\NetGuard\NetGuard.exe`
+
+> **Note:** Npcap cannot be bundled inside the exe. It must be installed separately on the target machine.
+
+### Linux / macOS
+
+```bash
+bash build.sh
+```
+
+Produces `dist/NetGuard/NetGuard`.  Root is required at **runtime**, not during the build.
+
+---
+
 ## Interface Overview
 
-NetGuard has three main tabs:
+NetGuard has four main tabs:
 
 ### 📡 Capture Tab
 
@@ -51,6 +97,7 @@ NetGuard has three main tabs:
 | **Filter** box | Type-to-search across source IP, dest IP, protocol, and port |
 | **Protocol** filter | Quickly narrow to TCP, UDP, HTTP, DNS, etc. |
 | **▶ Start / ■ Stop** | Begin or end a capture session |
+| **⏸ Pause / ▶ Resume** | Pause the display without stopping the capture engine |
 | **📂 Open** | Load packets from a `.pcap` / `.pcapng` file for offline analysis |
 | **Packet table** | Colour-coded list of live packets |
 | **Detail panel** | Click any row to see full layer breakdown + hex dump |
@@ -74,7 +121,8 @@ Displays real-time threat detections.  Each alert shows:
 - **Source / Destination IP**
 - **Description** of what was detected
 
-You can filter by severity or category using the dropdowns.
+You can filter by severity or category using the dropdowns.  
+Click **Export** to save alerts to CSV or JSON.
 
 ### 📊 Statistics Tab
 
@@ -84,6 +132,17 @@ Live dashboard showing:
 - Protocol distribution (bar chart)
 - Top 10 most active source IPs
 - Alert breakdown by severity
+
+### 🔗 Connections Tab
+
+Live view of tracked TCP and UDP flows:
+- **Protocol, Source/Dest IP, Ports**
+- **Connection state** (SYN → ESTABLISHED → CLOSING / RESET)
+- **Packet count** and total **data transferred**
+- **Duration** of each flow
+
+Flows are tracked automatically during both live capture and offline file analysis.
+Use the Protocol and State dropdowns to filter the list.
 
 ---
 
@@ -173,6 +232,7 @@ Click **💾 Save** in the toolbar at any time.
 Supported formats:
 - **CSV** — open in Excel, grep, or any text editor
 - **JSON** — for scripting and programmatic analysis
+- **PCAP** — fully compatible with Wireshark and tcpdump (requires raw bytes from the current session)
 
 ---
 
@@ -227,8 +287,8 @@ Integrate `geoip2` or `maxminddb` to show the physical location of external IPs 
 ### 4. Alert Notifications
 Use Windows Toast notifications (`win10toast`) or email alerts (`smtplib`) to push real-time warnings to your desktop or inbox.
 
-### 5. PCAP Export
-Add `scapy.utils.wrpcap()` to save raw packets in `.pcap` format, fully compatible with Wireshark.
+### 5. PCAP Export ✅ (implemented)
+`scapy.utils.wrpcap()` is used by **💾 Save** (choose PCAP format) to save raw packets in `.pcap` format, fully compatible with Wireshark.
 
 ### 6. Web Dashboard
 Expose a REST API (FastAPI) and serve a real-time dashboard in the browser using WebSockets, enabling remote monitoring.
@@ -251,9 +311,9 @@ Design a plugin loader so community-contributed detection rules can be dropped i
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+S` | Save capture |
-| `Ctrl+F` | Focus filter box |
-| `Space` | Pause / resume auto-scroll |
+| `Ctrl+S` | Save capture (CSV / JSON / PCAP) |
+| `Ctrl+O` | Open a capture file |
+| `Ctrl+F` | Focus the display filter box (switches to Capture tab) |
 
 ---
 

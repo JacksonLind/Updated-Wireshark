@@ -7,14 +7,18 @@ Clicking a row opens a full packet-detail panel at the bottom.
 
 from __future__ import annotations
 
+import csv
+import json
 import time
+from pathlib import Path
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QPushButton, QAbstractItemView,
-    QComboBox, QSplitter,
+    QComboBox, QSplitter, QFileDialog, QMessageBox,
 )
 
 from src.gui.theme import SEVERITY_PALETTE, BG_PANEL, TEXT_DIM, BORDER, ACCENT
@@ -98,6 +102,13 @@ class AlertsTab(QWidget):
         self._count_label = QLabel("0 alerts")
         self._count_label.setStyleSheet(f"color:{TEXT_DIM}; font-size:11px;")
         bar_layout.addWidget(self._count_label)
+
+        export_btn = QPushButton("Export")
+        export_btn.setProperty("secondary", "true")
+        export_btn.setFixedWidth(70)
+        export_btn.setToolTip("Save alerts to CSV or JSON")
+        export_btn.clicked.connect(self._export_alerts)
+        bar_layout.addWidget(export_btn)
 
         clear_btn = QPushButton("Clear")
         clear_btn.setProperty("secondary", "true")
@@ -226,3 +237,53 @@ class AlertsTab(QWidget):
         for alert in self._alerts:
             if self._passes_filter(alert):
                 self._append_row(alert)
+
+    def _export_alerts(self) -> None:
+        """Save all alerts to CSV or JSON."""
+        if not self._alerts:
+            QMessageBox.information(self, "No Alerts", "No alerts to export.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Alerts",
+            str(Path.home() / "netguard_alerts"),
+            "CSV Files (*.csv);;JSON Files (*.json)",
+        )
+        if not path:
+            return
+
+        try:
+            if path.endswith(".json"):
+                data = [
+                    {
+                        "id":          a.alert_id,
+                        "timestamp":   a.timestamp,
+                        "severity":    a.severity,
+                        "category":    a.category,
+                        "src_ip":      a.src_ip,
+                        "dst_ip":      a.dst_ip,
+                        "description": a.description,
+                    }
+                    for a in self._alerts
+                ]
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+            else:
+                fields = ["id", "timestamp", "severity", "category",
+                          "src_ip", "dst_ip", "description"]
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=fields)
+                    writer.writeheader()
+                    for a in self._alerts:
+                        writer.writerow({
+                            "id":          a.alert_id,
+                            "timestamp":   a.timestamp,
+                            "severity":    a.severity,
+                            "category":    a.category,
+                            "src_ip":      a.src_ip,
+                            "dst_ip":      a.dst_ip,
+                            "description": a.description,
+                        })
+            QMessageBox.information(self, "Exported", f"Alerts saved to:\n{path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Export Error", str(exc))
