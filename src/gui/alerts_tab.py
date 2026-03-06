@@ -94,6 +94,8 @@ class AlertsTab(QWidget):
             "ARP Spoofing", "DNS Tunneling", "Brute Force", "HTTP Brute Force",
             "NULL Scan", "XMAS Scan", "FIN Scan",
             "Large Packet", "SQL Injection", "XSS Attempt",
+            "Credential Harvesting",
+            "Traffic Spike", "Unusual Packet Size", "Protocol Shift", "New Talker",
         ])
         self._cat_filter.currentTextChanged.connect(self._apply_filter)
         bar_layout.addWidget(self._cat_filter)

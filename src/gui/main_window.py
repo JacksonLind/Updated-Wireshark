@@ -30,6 +30,7 @@ from src.gui.connections_tab import ConnectionsTab
 from src.gui.theme       import ACCENT, BG_PANEL, BORDER, TEXT_DIM, BG_DARK
 from src.core.capture_engine import CaptureEngine, list_interfaces
 from src.core.ids_engine     import IDSEngine, IDSAlert
+from src.core.anomaly_engine import AnomalyEngine, AnomalyEvent
 from src.core.connections    import ConnectionTracker
 from src.core.stream_reassembler import StreamReassembler
 from src.utils.helpers       import format_timestamp
@@ -40,9 +41,10 @@ from src.utils               import geoip
 # ── Qt-safe bridge: capture thread → main thread ─────────────────────────────
 
 class _CaptureSignals(QObject):
-    packet_received = pyqtSignal(dict)
-    alert_raised    = pyqtSignal(object)   # IDSAlert
-    error_occurred  = pyqtSignal(str)
+    packet_received  = pyqtSignal(dict)
+    alert_raised     = pyqtSignal(object)   # IDSAlert
+    anomaly_detected = pyqtSignal(object)   # AnomalyEvent
+    error_occurred   = pyqtSignal(str)
 
 
 class MainWindow(QMainWindow):
@@ -59,6 +61,7 @@ class MainWindow(QMainWindow):
             error_callback=self._on_capture_error,
         )
         self._ids      = IDSEngine(alert_callback=self._on_alert_raised)
+        self._anomaly  = AnomalyEngine(event_callback=self._on_anomaly_detected)
         self._conn_tracker = ConnectionTracker()
         self._stream_reassembler = StreamReassembler()
         self._captured: list[dict] = []
@@ -205,6 +208,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self._signals.packet_received.connect(self._handle_packet)
         self._signals.alert_raised.connect(self._handle_alert)
+        self._signals.anomaly_detected.connect(self._handle_anomaly)
         self._signals.error_occurred.connect(self._handle_error)
 
     def _setup_shortcuts(self) -> None:
@@ -221,6 +225,10 @@ class MainWindow(QMainWindow):
     def _on_alert_raised(self, alert: IDSAlert) -> None:
         """Called from capture thread — emit signal to jump to main thread."""
         self._signals.alert_raised.emit(alert)
+
+    def _on_anomaly_detected(self, event: AnomalyEvent) -> None:
+        """Called from capture thread — emit signal to jump to main thread."""
+        self._signals.anomaly_detected.emit(event)
 
     def _on_capture_error(self, exc: Exception) -> None:
         self._signals.error_occurred.emit(str(exc))
@@ -241,6 +249,10 @@ class MainWindow(QMainWindow):
             alert.raw_packet = info
             self._handle_alert(alert)
 
+        # Run anomaly detection
+        for event in self._anomaly.analyze(info):
+            self._handle_anomaly(event)
+
         count = len(self._captured)
         self._pkt_counter.setText(f"Packets: {count:,}")
 
@@ -249,6 +261,23 @@ class MainWindow(QMainWindow):
         self._stats_tab.record_alert(alert.severity)
         self._alert_counter.setText(f"Alerts: {self._stats_tab._alerts_total}")
         # Flash to the alerts tab badge (optional: bold if new alert)
+
+    def _handle_anomaly(self, event: AnomalyEvent) -> None:
+        """Convert an AnomalyEvent to an IDSAlert and display it in the Alerts tab."""
+        self._alert_counter_anomaly = getattr(self, "_alert_counter_anomaly", 0) + 1
+        alert = IDSAlert(
+            alert_id=self._alert_counter_anomaly + 10000,  # avoid ID clash with IDS
+            timestamp=event.timestamp,
+            severity=event.severity,
+            category=event.anomaly_type,
+            src_ip=event.src_ip,
+            dst_ip="",
+            description=f"[Anomaly] {event.description}",
+            packet_info="",
+        )
+        self._alerts_tab.add_alert(alert)
+        self._stats_tab.record_alert(alert.severity)
+        self._alert_counter.setText(f"Alerts: {self._stats_tab._alerts_total}")
 
     def _handle_error(self, msg: str) -> None:
         self._running = False
@@ -275,6 +304,7 @@ class MainWindow(QMainWindow):
         bpf   = self._bpf_input.text().strip()
 
         self._ids.reset()
+        self._anomaly.reset()
         self._conn_tracker.reset()
         self._stream_reassembler.reset()
         self._captured.clear()
@@ -349,6 +379,7 @@ class MainWindow(QMainWindow):
             from src.core.analyzer import analyze_packet
 
             self._ids.reset()
+            self._anomaly.reset()
             self._conn_tracker.reset()
             self._stream_reassembler.reset()
             self._captured.clear()
@@ -367,6 +398,8 @@ class MainWindow(QMainWindow):
                 self._stream_reassembler.process(info)
                 for alert in self._ids.check(info):
                     self._handle_alert(alert)
+                for event in self._anomaly.analyze(info):
+                    self._handle_anomaly(event)
 
             self._refresh_connections()
             count = len(self._captured)
