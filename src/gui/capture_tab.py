@@ -3,6 +3,7 @@ Packet Capture tab for NetGuard.
 
 Displays a live scrolling table of captured packets with per-protocol
 colour coding, a BPF filter bar, regex-powered search, packet bookmarking,
+column sorting (click any header), natural-language query support,
 and a detail panel at the bottom.
 """
 
@@ -19,12 +20,23 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QPushButton, QLineEdit, QComboBox,
     QAbstractItemView, QCheckBox, QMenu, QAction, QMessageBox, QFrame,
+    QToolTip,
 )
 
 from src.gui.theme import PROTO_PALETTE, BG_PANEL, TEXT_DIM, ACCENT, BORDER, BG_DARK
 from src.gui.detail_panel import DetailPanel
 
 MAX_ROWS = 5_000   # Cap rows to keep the UI snappy
+
+# Column index constants (must match COLUMNS order)
+_STAR_COL  = 0
+_NO_COL    = 1
+_TIME_COL  = 2
+_SRC_COL   = 3
+_DST_COL   = 4
+_PROTO_COL = 5
+_LEN_COL   = 6
+_INFO_COL  = 7   # stretched
 
 COLUMNS = [
     ("★",        30,  Qt.AlignCenter),
@@ -37,10 +49,75 @@ COLUMNS = [
     ("Info",     350, Qt.AlignLeft),
 ]
 
-# Internal data columns (not shown in COLUMNS but used for alignment mapping)
-_INFO_COL = 7   # "Info" column index in new COLUMNS layout
-_PROTO_COL = 5
-_STAR_COL  = 0
+
+class _NumericItem(QTableWidgetItem):
+    """QTableWidgetItem whose less-than comparison uses numeric ordering."""
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:  # type: ignore[override]
+        try:
+            return float(self.text()) < float(other.text())
+        except (ValueError, TypeError):
+            return self.text() < other.text()
+
+
+# ── Natural-language query translation ───────────────────────────────────────
+
+# Maps human-friendly phrases to (field, value) or special filter strings
+# The translator returns a tuple:
+#   ("proto", "DNS")  →  protocol filter
+#   ("text", "ssh")   →  free-text filter
+#   ("port", 443)     →  port filter string "port:443"
+#   ("size", ">1500") →  not currently used but reserved
+_NLQ_RULES: list[tuple[re.Pattern, str]] = [
+    # Protocol shortcuts
+    (re.compile(r'\b(dns\s*quer(y|ies)|show\s+dns|dns\s+traffic)\b', re.I), "__proto__:DNS"),
+    (re.compile(r'\b(http\s*traffic|web\s*traffic|show\s+http)\b',   re.I), "__proto__:HTTP"),
+    (re.compile(r'\b(https?\s*traffic|tls\s*traffic)\b',              re.I), "__proto__:HTTPS"),
+    (re.compile(r'\b(icmp|ping\s*traffic)\b',                         re.I), "__proto__:ICMP"),
+    (re.compile(r'\b(arp\s*traffic)\b',                               re.I), "__proto__:ARP"),
+    (re.compile(r'\b(udp\s*traffic)\b',                               re.I), "__proto__:UDP"),
+    (re.compile(r'\b(tcp\s*traffic)\b',                               re.I), "__proto__:TCP"),
+    (re.compile(r'\b(ssh\s*traffic)\b',                               re.I), "__proto__:SSH"),
+    # Intent shortcuts
+    (re.compile(r'\b(fail(ed)?\s*logins?|brute\s*force|login\s*attempts?)\b', re.I), "ssh"),
+    (re.compile(r'\b(large\s*packets?|big\s*packets?)\b',                re.I), "__size__:>1500"),
+    (re.compile(r'\b(port\s*scans?|scanning)\b',                         re.I), "SYN"),
+    # IP filters  "from 1.2.3.4" or "src 1.2.3.4"
+    (re.compile(r'\b(?:from|src(?:ip)?)\s+(\d{1,3}(?:\.\d{1,3}){3})\b', re.I), "__src__"),
+    (re.compile(r'\b(?:to|dst(?:ip)?|dest(?:ip)?)\s+(\d{1,3}(?:\.\d{1,3}){3})\b', re.I), "__dst__"),
+    # Port filter  "port 443" or "port:443"
+    (re.compile(r'\bport[\s:]+(\d+)\b', re.I), "__port__"),
+]
+
+
+def _translate_nlq(query: str) -> tuple[str, str]:
+    """
+    Translate a natural-language query to (filter_text, proto_override).
+
+    Returns
+    -------
+    filter_text   : text to put into the free-text filter box
+    proto_override: protocol name or "" (used to set the combo-box)
+    """
+    q = query.strip()
+    for pattern, result in _NLQ_RULES:
+        m = pattern.search(q)
+        if m is None:
+            continue
+        if result.startswith("__proto__:"):
+            return "", result.split(":", 1)[1]
+        if result == "__src__":
+            return m.group(1), ""
+        if result == "__dst__":
+            return m.group(1), ""
+        if result == "__port__":
+            return f"port:{m.group(1)}", ""
+        if result == "__size__:>1500":
+            # We handle this via text filter — the _matches_filter already checks it
+            return "__large__", ""
+        # Plain text shortcut
+        return result, ""
+    return q, ""  # passthrough
 
 
 class CaptureTab(QWidget):
@@ -62,6 +139,8 @@ class CaptureTab(QWidget):
         self._show_bookmarks_only: bool = False
         self._use_regex: bool = False
         self._stream_reassembler = None   # injected by MainWindow
+        self._sort_col: int = -1          # column being sorted (-1 = none)
+        self._sort_order: Qt.SortOrder = Qt.AscendingOrder
 
         self._build_ui()
 
@@ -122,11 +201,27 @@ class CaptureTab(QWidget):
 
         self._filter_input = QLineEdit()
         self._filter_input.setPlaceholderText(
-            "e.g.  tcp  |  192.168.1.1  |  dns  |  port:443  |  /regex/"
+            'e.g.  tcp  |  192.168.1.1  |  dns  |  port:443  |  /regex/  |  "failed logins"'
         )
-        self._filter_input.setMinimumWidth(260)
-        self._filter_input.textChanged.connect(self._apply_filter)
+        self._filter_input.setMinimumWidth(300)
+        self._filter_input.textChanged.connect(self._on_filter_changed)
         bar_layout.addWidget(self._filter_input, 1)
+
+        self._nlq_btn = QPushButton("🔍 NLQ")
+        self._nlq_btn.setProperty("secondary", "true")
+        self._nlq_btn.setFixedWidth(70)
+        self._nlq_btn.setToolTip(
+            "Natural Language Query — type a human-readable query and press this button.\n\n"
+            "Examples:\n"
+            "  • failed logins\n"
+            "  • dns queries\n"
+            "  • http traffic\n"
+            "  • from 192.168.1.1\n"
+            "  • port 443\n"
+            "  • large packets"
+        )
+        self._nlq_btn.clicked.connect(self._apply_nlq)
+        bar_layout.addWidget(self._nlq_btn)
 
         self._regex_cb = QCheckBox("Regex")
         self._regex_cb.setToolTip(
@@ -212,6 +307,10 @@ class CaptureTab(QWidget):
         self._table.setShowGrid(False)
         self._table.setWordWrap(False)
         self._table.verticalHeader().setDefaultSectionSize(22)
+        # Enable interactive sorting by clicking column headers
+        self._table.setSortingEnabled(True)
+        self._table.horizontalHeader().setSortIndicatorShown(True)
+        self._table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         self._table.currentItemChanged.connect(
             lambda cur, _: self._on_row_selected(cur.row() if cur else -1)
         )
@@ -231,6 +330,8 @@ class CaptureTab(QWidget):
 
     def _append_row(self, info: dict, pkt_idx: int) -> None:
         from src.utils.helpers import format_timestamp
+        # Temporarily disable sorting so insertion order is preserved
+        self._table.setSortingEnabled(False)
         row = self._table.rowCount()
         self._table.insertRow(row)
         self._filtered.append(info)
@@ -257,33 +358,46 @@ class CaptureTab(QWidget):
         aligns = [c[2] for c in COLUMNS]
 
         for col, (val, align) in enumerate(zip(values, aligns)):
-            item = QTableWidgetItem(val)
+            # Use numeric-sort item for No. and Length columns
+            if col in (_NO_COL, _LEN_COL):
+                item = _NumericItem(val)
+            else:
+                item = QTableWidgetItem(val)
             item.setTextAlignment(align | Qt.AlignVCenter)
             if col == _STAR_COL:
                 item.setForeground(QColor(ACCENT) if is_bookmarked else QColor(TEXT_DIM))
                 item.setToolTip("Click ★ to bookmark / unbookmark this packet")
-                # Store packet index for later toggle
+                # Store both the packet index and the full packet dict for
+                # row lookup after sorting (UserRole = pkt_idx, UserRole+1 = info)
                 item.setData(Qt.UserRole, pkt_idx)
+                item.setData(Qt.UserRole + 1, info)
             elif col == _PROTO_COL:
                 item.setForeground(color)
                 font = QFont()
                 font.setBold(True)
                 item.setFont(font)
             else:
-                item.setForeground(dim if col in (1, 6) else QColor("#e0e0e0"))
+                item.setForeground(dim if col in (_NO_COL, _LEN_COL) else QColor("#e0e0e0"))
             self._table.setItem(row, col, item)
 
         self._row_label.setText(f"{row + 1:,} packets")
 
-        if self._auto_scroll:
+        # Re-enable sorting (Qt will re-sort existing rows if a sort is active)
+        self._table.setSortingEnabled(True)
+
+        if self._auto_scroll and self._sort_col == -1:
             self._table.scrollToBottom()
 
     def _apply_filter(self) -> None:
-        self._filter_text = self._filter_input.text().strip()
+        # Read from the input box, UNLESS a special NLQ sentinel is already set
+        # (e.g. "__large__" is set by _apply_nlq and not shown in the text box)
+        if self._filter_text != "__large__":
+            self._filter_text = self._filter_input.text().strip()
         self._use_regex = self._regex_cb.isChecked()
         proto_sel = self._proto_filter.currentText()
         proto_filter = "" if proto_sel == "All Protocols" else proto_sel.upper()
 
+        self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         self._filtered.clear()
 
@@ -296,6 +410,8 @@ class CaptureTab(QWidget):
                 continue
             self._append_row(info, idx)
 
+        self._table.setSortingEnabled(True)
+
     def _matches_filter(self, info: dict) -> bool:
         proto_sel = self._proto_filter.currentText()
         if proto_sel != "All Protocols":
@@ -305,6 +421,10 @@ class CaptureTab(QWidget):
         txt = self._filter_text
         if not txt:
             return True
+
+        # Special NLQ token: large packets (>1500 bytes)
+        if txt == "__large__":
+            return info.get("length", 0) > 1500
 
         # Handle port: shorthand (e.g. "port:443")
         port_match = re.match(r'^port:(\d+)$', txt, re.IGNORECASE)
@@ -331,29 +451,91 @@ class CaptureTab(QWidget):
                 return False
         return txt.lower() in searchable.lower()
 
+    def _on_filter_changed(self) -> None:
+        """Called whenever the filter text changes (live filtering)."""
+        self._filter_text = self._filter_input.text().strip()
+        self._use_regex = self._regex_cb.isChecked()
+        self._apply_filter()
+
+    def _apply_nlq(self) -> None:
+        """Translate the current filter text as a natural-language query."""
+        raw = self._filter_input.text().strip()
+        if not raw:
+            return
+        text, proto_override = _translate_nlq(raw)
+
+        # Update the proto filter combo if a protocol was detected
+        if proto_override:
+            idx = self._proto_filter.findText(proto_override)
+            if idx >= 0:
+                self._proto_filter.setCurrentIndex(idx)
+            else:
+                self._proto_filter.setCurrentIndex(0)
+
+        # Handle special __large__ token
+        if text == "__large__":
+            self._filter_input.blockSignals(True)
+            self._filter_input.setText("")
+            self._filter_input.blockSignals(False)
+            self._filter_text = "__large__"
+            self._use_regex = False
+            self._apply_filter()
+            return
+
+        if text != raw:
+            # Update the text box with the translated filter (keep signals to trigger re-filter)
+            self._filter_input.setText(text)
+        else:
+            self._apply_filter()
+
+    def _on_header_clicked(self, col: int) -> None:
+        """Track which column is currently being sorted."""
+        if self._sort_col == col:
+            # Cycle through Ascending → Descending → None
+            if self._sort_order == Qt.AscendingOrder:
+                self._sort_order = Qt.DescendingOrder
+            else:
+                self._sort_col = -1
+                self._table.horizontalHeader().setSortIndicator(-1, Qt.AscendingOrder)
+                return
+        else:
+            self._sort_col = col
+            self._sort_order = Qt.AscendingOrder
+        self._table.horizontalHeader().setSortIndicator(self._sort_col, self._sort_order)
+
+    def _get_row_info(self, row: int) -> dict | None:
+        """Return the packet info dict for the given visual row (sort-safe)."""
+        star_item = self._table.item(row, _STAR_COL)
+        if star_item is None:
+            return None
+        info = star_item.data(Qt.UserRole + 1)
+        return info
+
     def _on_row_selected(self, row: int) -> None:
-        if 0 <= row < len(self._filtered):
-            info = self._filtered[row]
+        if row < 0:
+            return
+        info = self._get_row_info(row)
+        if info is not None:
             self._detail.show_packet(info)
             self.packet_selected.emit(info)
 
     def _on_row_double_clicked(self, row: int, _col: int) -> None:
         """Open a full packet detail popup when the user double-clicks a row."""
-        if 0 <= row < len(self._filtered):
-            info = self._filtered[row]
-            star_item = self._table.item(row, _STAR_COL)
-            pkt_number = row + 1
-            if star_item is not None:
-                # Prefer the visible row number
-                no_item = self._table.item(row, 1)
-                if no_item is not None:
-                    try:
-                        pkt_number = int(no_item.text())
-                    except ValueError:
-                        pass
-            from src.gui.packet_detail_dialog import PacketDetailDialog
-            dlg = PacketDetailDialog(info, pkt_number=pkt_number, parent=self)
-            dlg.show()
+        info = self._get_row_info(row)
+        if info is None:
+            return
+        star_item = self._table.item(row, _STAR_COL)
+        pkt_number = row + 1
+        if star_item is not None:
+            no_item = self._table.item(row, _NO_COL)
+            if no_item is not None:
+                try:
+                    pkt_number = int(no_item.text())
+                except ValueError:
+                    pass
+        from src.gui.packet_detail_dialog import PacketDetailDialog
+        dlg = PacketDetailDialog(info, pkt_number=pkt_number, parent=self)
+        dlg.show()
 
     def _toggle_pause(self, checked: bool) -> None:
         self._paused = checked
@@ -373,10 +555,10 @@ class CaptureTab(QWidget):
             return
 
         row = item.row()
-        if row < 0 or row >= len(self._filtered):
+        info = self._get_row_info(row)
+        if info is None:
             return
 
-        info = self._filtered[row]
         star_item = self._table.item(row, _STAR_COL)
         pkt_idx = star_item.data(Qt.UserRole) if star_item else None
 

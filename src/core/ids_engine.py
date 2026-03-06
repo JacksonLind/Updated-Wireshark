@@ -3,19 +3,21 @@ IDS (Intrusion Detection System) engine for NetGuard.
 
 Rules implemented
 -----------------
-1.  Port Scan          - ≥15 distinct dst-ports contacted from same src in 10 s
-2.  SYN Flood          - ≥50 SYN-only packets from same src in 5 s
-3.  ICMP Flood         - ≥30 ICMP echo-requests from same src in 5 s
-4.  ARP Spoofing       - same IP announced by ≥2 different MACs
-5.  DNS Tunneling      - DNS query name longer than 80 characters
-6.  Brute Force        - ≥20 TCP SYN packets to port 22/3389/21/23 in 30 s
-7.  NULL Scan          - TCP packet with no flags set
-8.  XMAS Scan          - TCP packet with FIN+PSH+URG set
-9.  Large Packet       - single packet > 9000 bytes
-10. HTTP Injection     - SQL/XSS patterns detected in HTTP payload
-11. UDP Flood          - ≥100 UDP packets from same src in 5 s
-12. FIN Scan           - TCP packet with only FIN flag set
-13. HTTP Brute Force   - ≥20 HTTP POST requests from same src in 30 s
+1.  Port Scan             - ≥15 distinct dst-ports contacted from same src in 10 s
+2.  SYN Flood             - ≥50 SYN-only packets from same src in 5 s
+3.  ICMP Flood            - ≥30 ICMP echo-requests from same src in 5 s
+4.  ARP Spoofing          - same IP announced by ≥2 different MACs
+5.  DNS Tunneling         - DNS query name longer than 80 characters
+6.  Brute Force           - ≥20 TCP SYN packets to port 22/3389/21/23 in 30 s
+7.  NULL Scan             - TCP packet with no flags set
+8.  XMAS Scan             - TCP packet with FIN+PSH+URG set
+9.  Large Packet          - single packet > 9000 bytes
+10. HTTP Injection        - SQL/XSS patterns detected in HTTP payload
+11. UDP Flood             - ≥100 UDP packets from same src in 5 s
+12. FIN Scan              - TCP packet with only FIN flag set
+13. HTTP Brute Force      - ≥20 HTTP POST requests from same src in 30 s
+14. Credential Harvesting - HTTP Basic Auth headers or FTP/Telnet plaintext credentials
+15. Cleartext Password    - Plaintext password keywords in unencrypted TCP payload
 """
 
 from __future__ import annotations
@@ -58,6 +60,21 @@ class IDSEngine:
     XSS_PATTERNS = re.compile(
         r"(<script|javascript:|onerror\s*=|onload\s*=|alert\s*\()",
         re.IGNORECASE,
+    )
+    # HTTP Basic Auth header (base64-encoded credentials)
+    BASIC_AUTH_PATTERN = re.compile(
+        r"Authorization:\s*Basic\s+[A-Za-z0-9+/=]+",
+        re.IGNORECASE,
+    )
+    # Plaintext credential keywords in unencrypted payloads
+    CLEARTEXT_CRED_PATTERN = re.compile(
+        r"(password|passwd|pwd|pass)\s*[:=]\s*\S+",
+        re.IGNORECASE,
+    )
+    # FTP/Telnet credential commands
+    FTP_PASS_PATTERN = re.compile(
+        r"^PASS\s+\S+",
+        re.IGNORECASE | re.MULTILINE,
     )
 
     def __init__(self, alert_callback: Callable[[IDSAlert], None] | None = None):
@@ -191,6 +208,38 @@ class IDSEngine:
                 # 13. HTTP Brute Force (rapid POST requests)
                 if text.startswith("POST ") and dst_port in (80, 8080, 443, 8443):
                     alerts += self._check_http_brute(src, dst, dst_port, now)
+                # 14. HTTP Basic Auth credential harvesting
+                if self.BASIC_AUTH_PATTERN.search(text) and dst_port in (80, 8080):
+                    alerts += self._alert(
+                        f"basicauth_{src}_{dst}", now, "HIGH", "Credential Harvesting",
+                        src, dst,
+                        "HTTP Basic Auth credentials transmitted in cleartext (unencrypted HTTP). "
+                        "Credentials are trivially interceptable.",
+                        info.get("info", ""),
+                    )
+                # 15. Plaintext password in unencrypted payload
+                if self.CLEARTEXT_CRED_PATTERN.search(text) and dst_port not in (443, 8443, 465, 993, 995):
+                    alerts += self._alert(
+                        f"cleartextpwd_{src}_{dst}", now, "HIGH", "Credential Harvesting",
+                        src, dst,
+                        "Plaintext password keyword detected in unencrypted TCP payload.",
+                        info.get("info", ""),
+                    )
+            except Exception:
+                pass
+
+        # 14. FTP plaintext PASS command (port 21)
+        if proto == "TCP" and dst_port == 21 and payload:
+            try:
+                text = payload.decode("utf-8", errors="ignore")
+                if self.FTP_PASS_PATTERN.search(text):
+                    alerts += self._alert(
+                        f"ftppass_{src}_{dst}", now, "CRITICAL", "Credential Harvesting",
+                        src, dst,
+                        f"FTP plaintext PASS command intercepted from {src} to {dst}:21 — "
+                        "credentials transmitted without encryption.",
+                        info.get("info", ""),
+                    )
             except Exception:
                 pass
 
