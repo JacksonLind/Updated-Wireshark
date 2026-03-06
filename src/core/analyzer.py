@@ -145,13 +145,43 @@ def analyze_packet(pkt) -> dict[str, Any]:
             if pkt.haslayer(DNS):
                 dns = pkt[DNS]
                 result["protocol"] = "DNS"
+                result["dns_qr"] = int(dns.qr)
+                result["dns_transaction_id"] = int(dns.id)
                 if dns.qd:
                     qname = dns.qd.qname
                     if isinstance(qname, bytes):
                         qname = qname.decode(errors="replace")
+                    qname = qname.rstrip(".")
+                    result["dns_query"] = qname
+                    qtype_map = {
+                        1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR",
+                        15: "MX", 16: "TXT", 28: "AAAA", 33: "SRV", 255: "ANY",
+                    }
+                    result["dns_qtype"] = qtype_map.get(int(dns.qd.qtype), str(dns.qd.qtype))
                     result["info"] = f"DNS {'Query' if dns.qr == 0 else 'Response'}: {qname}"
                 else:
                     result["info"] = "DNS"
+                # Extract answer records
+                dns_answers: list[str] = []
+                try:
+                    rr = dns.an
+                    while rr and hasattr(rr, "rrname"):
+                        rrname = rr.rrname
+                        if isinstance(rrname, bytes):
+                            rrname = rrname.decode(errors="replace").rstrip(".")
+                        rdata = getattr(rr, "rdata", None)
+                        if rdata is None:
+                            rdata = getattr(rr, "address", "")
+                        if isinstance(rdata, bytes):
+                            try:
+                                rdata = rdata.decode(errors="replace").rstrip(".")
+                            except Exception:
+                                rdata = rdata.hex()
+                        dns_answers.append(f"{rrname} → {rdata}")
+                        rr = rr.payload if hasattr(rr, "payload") else None
+                except Exception:
+                    pass
+                result["dns_answers"] = dns_answers
             else:
                 src_svc = get_port_service(udp.sport)
                 dst_svc = get_port_service(udp.dport)

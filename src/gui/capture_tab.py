@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QPushButton, QLineEdit, QComboBox,
-    QAbstractItemView, QCheckBox, QMenu, QAction, QMessageBox,
+    QAbstractItemView, QCheckBox, QMenu, QAction, QMessageBox, QFrame,
 )
 
 from src.gui.theme import PROTO_PALETTE, BG_PANEL, TEXT_DIM, ACCENT, BORDER, BG_DARK
@@ -32,7 +32,7 @@ COLUMNS = [
     ("Time",     90, Qt.AlignLeft),
     ("Source IP",130, Qt.AlignLeft),
     ("Dest IP",  130, Qt.AlignLeft),
-    ("Protocol", 80,  Qt.AlignCenter),
+    ("Protocol", 90,  Qt.AlignCenter),
     ("Length",   70,  Qt.AlignRight),
     ("Info",     350, Qt.AlignLeft),
 ]
@@ -115,18 +115,18 @@ class CaptureTab(QWidget):
         bar.setFixedHeight(52)
         bar.setStyleSheet(f"background:{BG_PANEL}; border-bottom:1px solid {BORDER};")
         bar_layout = QHBoxLayout(bar)
-        bar_layout.setContentsMargins(12, 8, 12, 8)
-        bar_layout.setSpacing(8)
+        bar_layout.setContentsMargins(12, 6, 12, 6)
+        bar_layout.setSpacing(6)
 
         bar_layout.addWidget(QLabel("Filter:"))
 
         self._filter_input = QLineEdit()
         self._filter_input.setPlaceholderText(
-            "e.g.  tcp   |   192.168.1.1   |   dns   |   port:443   |   /regex/"
+            "e.g.  tcp  |  192.168.1.1  |  dns  |  port:443  |  /regex/"
         )
-        self._filter_input.setMinimumWidth(300)
+        self._filter_input.setMinimumWidth(260)
         self._filter_input.textChanged.connect(self._apply_filter)
-        bar_layout.addWidget(self._filter_input)
+        bar_layout.addWidget(self._filter_input, 1)
 
         self._regex_cb = QCheckBox("Regex")
         self._regex_cb.setToolTip(
@@ -144,10 +144,16 @@ class CaptureTab(QWidget):
         self._proto_filter.currentTextChanged.connect(self._apply_filter)
         bar_layout.addWidget(self._proto_filter)
 
+        # Visual separator
+        _sep1 = QFrame()
+        _sep1.setFrameShape(QFrame.VLine)
+        _sep1.setStyleSheet(f"color:{BORDER};")
+        bar_layout.addWidget(_sep1)
+
         self._bookmarks_btn = QPushButton("★ Bookmarks")
         self._bookmarks_btn.setProperty("secondary", "true")
         self._bookmarks_btn.setCheckable(True)
-        self._bookmarks_btn.setFixedWidth(110)
+        self._bookmarks_btn.setFixedWidth(120)
         self._bookmarks_btn.setToolTip("Show only bookmarked packets")
         self._bookmarks_btn.clicked.connect(self._toggle_bookmarks)
         bar_layout.addWidget(self._bookmarks_btn)
@@ -159,9 +165,9 @@ class CaptureTab(QWidget):
         )
         bar_layout.addWidget(self._auto_scroll_cb)
 
-        self._pause_btn = QPushButton("⏸  Pause")
+        self._pause_btn = QPushButton("⏸ Pause")
         self._pause_btn.setProperty("secondary", "true")
-        self._pause_btn.setFixedWidth(90)
+        self._pause_btn.setFixedWidth(100)
         self._pause_btn.setToolTip("Pause display updates (packets still captured)")
         self._pause_btn.setCheckable(True)
         self._pause_btn.clicked.connect(self._toggle_pause)
@@ -173,9 +179,15 @@ class CaptureTab(QWidget):
         self._row_label.setStyleSheet(f"color:{TEXT_DIM}; font-size:11px;")
         bar_layout.addWidget(self._row_label)
 
+        # Visual separator
+        _sep2 = QFrame()
+        _sep2.setFrameShape(QFrame.VLine)
+        _sep2.setStyleSheet(f"color:{BORDER};")
+        bar_layout.addWidget(_sep2)
+
         clear_btn = QPushButton("Clear")
         clear_btn.setProperty("secondary", "true")
-        clear_btn.setFixedWidth(70)
+        clear_btn.setFixedWidth(80)
         clear_btn.clicked.connect(self.clear)
         bar_layout.addWidget(clear_btn)
 
@@ -203,6 +215,7 @@ class CaptureTab(QWidget):
         self._table.currentItemChanged.connect(
             lambda cur, _: self._on_row_selected(cur.row() if cur else -1)
         )
+        self._table.cellDoubleClicked.connect(self._on_row_double_clicked)
         self._table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._show_context_menu)
 
@@ -324,9 +337,27 @@ class CaptureTab(QWidget):
             self._detail.show_packet(info)
             self.packet_selected.emit(info)
 
+    def _on_row_double_clicked(self, row: int, _col: int) -> None:
+        """Open a full packet detail popup when the user double-clicks a row."""
+        if 0 <= row < len(self._filtered):
+            info = self._filtered[row]
+            star_item = self._table.item(row, _STAR_COL)
+            pkt_number = row + 1
+            if star_item is not None:
+                # Prefer the visible row number
+                no_item = self._table.item(row, 1)
+                if no_item is not None:
+                    try:
+                        pkt_number = int(no_item.text())
+                    except ValueError:
+                        pass
+            from src.gui.packet_detail_dialog import PacketDetailDialog
+            dlg = PacketDetailDialog(info, pkt_number=pkt_number, parent=self)
+            dlg.show()
+
     def _toggle_pause(self, checked: bool) -> None:
         self._paused = checked
-        self._pause_btn.setText("▶  Resume" if checked else "⏸  Pause")
+        self._pause_btn.setText("▶ Resume" if checked else "⏸ Pause")
 
     def _toggle_bookmarks(self, checked: bool) -> None:
         self._show_bookmarks_only = checked

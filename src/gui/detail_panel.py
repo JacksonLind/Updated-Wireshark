@@ -29,7 +29,7 @@ class DetailPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        header = QLabel("  Packet Details")
+        header = QLabel("  Packet Details  —  double-click a row to open full view")
         header.setFixedHeight(28)
         header.setStyleSheet(
             f"background:{BG_PANEL}; color:{TEXT_DIM}; "
@@ -107,6 +107,23 @@ class DetailPanel(QWidget):
             if info.get("flags"):
                 fields.append(("TCP Flags", info["flags"]))
             add_section("Transport", fields)
+
+        # DNS layer
+        if info.get("dns_query") is not None:
+            qr = info.get("dns_qr", 0)
+            dns_fields = [
+                ("Direction",      "Query" if qr == 0 else "Response"),
+                ("Transaction ID", f"0x{info.get('dns_transaction_id', 0):04x}"),
+                ("Query Name",     info.get("dns_query", "")),
+                ("Query Type",     info.get("dns_qtype", "")),
+            ]
+            answers = info.get("dns_answers", [])
+            if answers:
+                for i, ans in enumerate(answers, 1):
+                    dns_fields.append((f"Answer {i}", ans))
+            elif qr == 1:
+                dns_fields.append(("Answers", "(none)"))
+            add_section("DNS", dns_fields)
 
         payload = info.get("payload", b"")
         if payload:
