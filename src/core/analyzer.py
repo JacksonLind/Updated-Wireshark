@@ -49,6 +49,7 @@ def analyze_packet(pkt) -> dict[str, Any]:
         "flags":       "",
         "payload":     b"",
         "tcp_flags":   {f: False for f in ("SYN", "ACK", "RST", "FIN", "PSH", "URG")},
+        "raw_bytes":   bytes(pkt),   # kept for PCAP export
     }
 
     try:

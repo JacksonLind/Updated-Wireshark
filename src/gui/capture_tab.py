@@ -73,6 +73,11 @@ class CaptureTab(QWidget):
     def set_paused(self, paused: bool) -> None:
         self._paused = paused
 
+    def focus_filter(self) -> None:
+        """Give keyboard focus to the display filter input."""
+        self._filter_input.setFocus()
+        self._filter_input.selectAll()
+
     # ── UI construction ────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
@@ -112,6 +117,14 @@ class CaptureTab(QWidget):
             lambda s: setattr(self, "_auto_scroll", bool(s))
         )
         bar_layout.addWidget(self._auto_scroll_cb)
+
+        self._pause_btn = QPushButton("⏸  Pause")
+        self._pause_btn.setProperty("secondary", "true")
+        self._pause_btn.setFixedWidth(90)
+        self._pause_btn.setToolTip("Pause display updates (packets still captured)")
+        self._pause_btn.setCheckable(True)
+        self._pause_btn.clicked.connect(self._toggle_pause)
+        bar_layout.addWidget(self._pause_btn)
 
         bar_layout.addStretch()
 
@@ -240,3 +253,7 @@ class CaptureTab(QWidget):
             info = self._filtered[row]
             self._detail.show_packet(info)
             self.packet_selected.emit(info)
+
+    def _toggle_pause(self, checked: bool) -> None:
+        self._paused = checked
+        self._pause_btn.setText("▶  Resume" if checked else "⏸  Pause")

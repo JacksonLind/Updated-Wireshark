@@ -14,21 +14,23 @@ import time
 from pathlib import Path
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
-from PyQt5.QtGui import QIcon, QFont, QColor
+from PyQt5.QtGui import QIcon, QFont, QColor, QKeySequence
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QToolBar, QComboBox, QLabel,
     QStatusBar, QAction, QFileDialog, QMessageBox,
     QDialog, QDialogButtonBox, QTextBrowser,
-    QSplitter, QPushButton, QLineEdit,
+    QSplitter, QPushButton, QLineEdit, QShortcut,
 )
 
 from src.gui.capture_tab import CaptureTab
 from src.gui.alerts_tab  import AlertsTab
 from src.gui.stats_tab   import StatsTab
+from src.gui.connections_tab import ConnectionsTab
 from src.gui.theme       import ACCENT, BG_PANEL, BORDER, TEXT_DIM, BG_DARK
 from src.core.capture_engine import CaptureEngine, list_interfaces
 from src.core.ids_engine     import IDSEngine, IDSAlert
+from src.core.connections    import ConnectionTracker
 from src.utils.helpers       import format_timestamp
 
 
@@ -54,11 +56,14 @@ class MainWindow(QMainWindow):
             error_callback=self._on_capture_error,
         )
         self._ids      = IDSEngine(alert_callback=self._on_alert_raised)
+        self._conn_tracker = ConnectionTracker()
         self._captured: list[dict] = []
         self._running   = False
+        self._pkt_rate_count: int = 0   # packets since last rate tick
 
         self._build_ui()
         self._connect_signals()
+        self._setup_shortcuts()
         self._status("Ready — select an interface and press  ▶  Start")
         self.setWindowTitle(f"{self.APP_NAME}  {self.VERSION}")
         self.resize(1280, 800)
@@ -141,10 +146,12 @@ class MainWindow(QMainWindow):
         self._capture_tab = CaptureTab()
         self._alerts_tab  = AlertsTab()
         self._stats_tab   = StatsTab()
+        self._conn_tab    = ConnectionsTab()
 
         self._tabs.addTab(self._capture_tab, "📡  Capture")
         self._tabs.addTab(self._alerts_tab,  "🚨  IDS Alerts")
         self._tabs.addTab(self._stats_tab,   "📊  Statistics")
+        self._tabs.addTab(self._conn_tab,    "🔗  Connections")
 
         # ── Status bar ─────────────────────────────────────────────────────
         self._status_bar = QStatusBar()
@@ -158,14 +165,23 @@ class MainWindow(QMainWindow):
         self._alert_counter.setStyleSheet(f"color:#FF8800; font-size:11px;")
         self._status_bar.addPermanentWidget(self._alert_counter)
 
+        self._rate_label = QLabel("  0 pkt/s")
+        self._rate_label.setStyleSheet(f"color:{TEXT_DIM}; font-size:11px;")
+        self._status_bar.addPermanentWidget(self._rate_label)
+
         self._elapsed_label = QLabel("  00:00")
         self._elapsed_label.setStyleSheet(f"color:{TEXT_DIM}; font-size:11px;")
         self._status_bar.addPermanentWidget(self._elapsed_label)
 
-        # Elapsed timer
+        # Elapsed / rate timer (fires every second during capture)
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.timeout.connect(self._update_elapsed)
         self._start_time: float = 0.0
+
+        # Connection table refresh timer (fires every 2 s, always active)
+        self._conn_timer = QTimer(self)
+        self._conn_timer.timeout.connect(self._refresh_connections)
+        self._conn_timer.start(2000)
 
     def _populate_interfaces(self) -> None:
         ifaces = list_interfaces()
@@ -183,6 +199,11 @@ class MainWindow(QMainWindow):
         self._signals.packet_received.connect(self._handle_packet)
         self._signals.alert_raised.connect(self._handle_alert)
         self._signals.error_occurred.connect(self._handle_error)
+
+    def _setup_shortcuts(self) -> None:
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self._save_capture)
+        QShortcut(QKeySequence("Ctrl+O"), self).activated.connect(self._open_capture_file)
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._focus_filter)
 
     # ── Callbacks from capture / IDS threads ─────────────────────────────────
 
@@ -203,6 +224,8 @@ class MainWindow(QMainWindow):
         self._captured.append(info)
         self._capture_tab.add_packet(info)
         self._stats_tab.record_packet(info)
+        self._conn_tracker.process(info)
+        self._pkt_rate_count += 1
 
         # Run IDS — attach the triggering packet so the Alerts tab can show details
         alerts = self._ids.check(info)
@@ -244,10 +267,13 @@ class MainWindow(QMainWindow):
         bpf   = self._bpf_input.text().strip()
 
         self._ids.reset()
+        self._conn_tracker.reset()
         self._captured.clear()
+        self._pkt_rate_count = 0
         self._capture_tab.clear()
         self._alerts_tab.clear()
         self._stats_tab.reset()
+        self._conn_tab.clear()
 
         self._engine.start(interface=iface, bpf_filter=bpf)
         self._running = True
@@ -265,6 +291,8 @@ class MainWindow(QMainWindow):
         self._start_action.setEnabled(True)
         self._stop_action.setEnabled(False)
         self._elapsed_timer.stop()
+        self._rate_label.setText("  0 pkt/s")
+        self._pkt_rate_count = 0
         count = len(self._captured)
         self._status(f"Capture stopped — {count:,} packets captured.")
 
@@ -272,6 +300,19 @@ class MainWindow(QMainWindow):
         elapsed = int(time.time() - self._start_time)
         m, s = divmod(elapsed, 60)
         self._elapsed_label.setText(f"  {m:02d}:{s:02d}")
+        rate = self._pkt_rate_count
+        self._pkt_rate_count = 0
+        self._rate_label.setText(f"  {rate:,} pkt/s")
+
+    def _refresh_connections(self) -> None:
+        """Prune stale connections and push the updated list to the connections tab."""
+        self._conn_tracker.prune()
+        self._conn_tab.update_connections(self._conn_tracker.get_active())
+
+    def _focus_filter(self) -> None:
+        """Switch to Capture tab and focus the display-filter input."""
+        self._tabs.setCurrentWidget(self._capture_tab)
+        self._capture_tab.focus_filter()
 
     # ── Open capture file ────────────────────────────────────────────────────
 
@@ -299,10 +340,12 @@ class MainWindow(QMainWindow):
             from src.core.analyzer import analyze_packet
 
             self._ids.reset()
+            self._conn_tracker.reset()
             self._captured.clear()
             self._capture_tab.clear()
             self._alerts_tab.clear()
             self._stats_tab.reset()
+            self._conn_tab.clear()
 
             raw_packets = rdpcap(path)
             for pkt in raw_packets:
@@ -310,9 +353,11 @@ class MainWindow(QMainWindow):
                 self._captured.append(info)
                 self._capture_tab.add_packet(info)
                 self._stats_tab.record_packet(info)
+                self._conn_tracker.process(info)
                 for alert in self._ids.check(info):
                     self._handle_alert(alert)
 
+            self._refresh_connections()
             count = len(self._captured)
             self._pkt_counter.setText(f"Packets: {count:,}")
             self._status(
@@ -335,19 +380,40 @@ class MainWindow(QMainWindow):
         path, filt = QFileDialog.getSaveFileName(
             self, "Save Capture",
             str(Path.home() / "netguard_capture"),
-            "CSV Files (*.csv);;JSON Files (*.json)",
+            "CSV Files (*.csv);;JSON Files (*.json);;PCAP Files (*.pcap)",
         )
         if not path:
             return
 
         try:
             if path.endswith(".json"):
-                safe = []
-                for p in self._captured:
-                    d = {k: v for k, v in p.items() if k not in ("payload", "tcp_flags")}
-                    safe.append(d)
+                # Exclude binary / internal-only fields from JSON output
+                exclude = {"payload", "tcp_flags", "raw_bytes"}
+                safe = [
+                    {k: v for k, v in p.items() if k not in exclude}
+                    for p in self._captured
+                ]
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(safe, f, indent=2)
+            elif path.endswith(".pcap"):
+                from scapy.all import wrpcap
+                from scapy.layers.l2 import Ether
+                raw_pkts = []
+                for p in self._captured:
+                    raw = p.get("raw_bytes", b"")
+                    if raw:
+                        try:
+                            raw_pkts.append(Ether(raw))
+                        except Exception:
+                            pass
+                if not raw_pkts:
+                    QMessageBox.warning(
+                        self, "PCAP Export",
+                        "No raw packet data available for PCAP export.\n"
+                        "Raw bytes are only stored during this session.",
+                    )
+                    return
+                wrpcap(path, raw_pkts)
             else:
                 fields = ["timestamp", "src_ip", "dst_ip", "protocol",
                           "src_port", "dst_port", "length", "flags", "info"]
