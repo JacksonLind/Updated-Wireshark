@@ -3,6 +3,7 @@ IDS Alerts tab for NetGuard.
 
 Real-time table of intrusion-detection alerts, colour-coded by severity.
 Clicking a row opens a full packet-detail panel at the bottom.
+Double-clicking a row opens a full packet-detail popup for deeper analysis.
 """
 
 from __future__ import annotations
@@ -143,6 +144,7 @@ class AlertsTab(QWidget):
         self._table.currentItemChanged.connect(
             lambda cur, _: self._on_row_selected(cur.row() if cur is not None else -1)
         )
+        self._table.cellDoubleClicked.connect(self._on_row_double_clicked)
         splitter.addWidget(self._table)
 
         # Packet detail panel
@@ -155,7 +157,8 @@ class AlertsTab(QWidget):
         # Bottom info strip
         info_bar = QLabel(
             "  ⚠  Alerts are raised in real-time as suspicious patterns are detected. "
-            "Click a row to inspect the triggering packet."
+            "Click a row to inspect the triggering packet.  "
+            "Double-click a row to open a full packet analysis popup."
         )
         info_bar.setFixedHeight(26)
         info_bar.setStyleSheet(
@@ -215,25 +218,45 @@ class AlertsTab(QWidget):
         """Show packet details for the selected alert row."""
         if 0 <= row < len(self._visible_alerts):
             alert = self._visible_alerts[row]
-            # If the alert carries the full triggering packet, show it.
-            # Otherwise synthesise a minimal info dict from the alert fields.
-            if alert.raw_packet and 'timestamp' in alert.raw_packet:
-                self._detail.show_packet(alert.raw_packet)
-            else:
-                synthetic = {
-                    "timestamp": alert.timestamp,
-                    "src_ip":    alert.src_ip,
-                    "dst_ip":    alert.dst_ip,
-                    "protocol":  alert.category,
-                    "src_port":  None,
-                    "dst_port":  None,
-                    "length":    0,
-                    "layers":    [],
-                    "flags":     "",
-                    "payload":   b"",
-                    "info":      alert.description,
-                }
-                self._detail.show_packet(synthetic)
+            self._detail.show_packet(self._get_alert_packet_info(alert))
+
+    def _on_row_double_clicked(self, row: int, _col: int) -> None:
+        """Open a full packet detail popup when the user double-clicks an alert row."""
+        if not (0 <= row < len(self._visible_alerts)):
+            return
+        alert = self._visible_alerts[row]
+        from src.gui.packet_detail_dialog import PacketDetailDialog
+        dlg = PacketDetailDialog(
+            self._get_alert_packet_info(alert),
+            pkt_number=alert.alert_id,
+            parent=self,
+        )
+        dlg.setWindowTitle(
+            f"Alert #{alert.alert_id}  [{alert.severity}]  —  {alert.category}"
+        )
+        dlg.show()
+
+    def _get_alert_packet_info(self, alert: IDSAlert) -> dict:
+        """Return the packet info dict for an alert.
+
+        If the alert carries the full triggering packet, that is returned.
+        Otherwise a minimal synthetic dict is built from the alert fields.
+        """
+        if alert.raw_packet and 'timestamp' in alert.raw_packet:
+            return alert.raw_packet
+        return {
+            "timestamp": alert.timestamp,
+            "src_ip":    alert.src_ip,
+            "dst_ip":    alert.dst_ip,
+            "protocol":  alert.category,
+            "src_port":  None,
+            "dst_port":  None,
+            "length":    0,
+            "layers":    [],
+            "flags":     "",
+            "payload":   b"",
+            "info":      alert.description,
+        }
 
     def _passes_filter(self, alert: IDSAlert) -> bool:
         sev = self._sev_filter.currentText()
