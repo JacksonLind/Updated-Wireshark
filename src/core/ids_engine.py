@@ -13,6 +13,9 @@ Rules implemented
 8.  XMAS Scan          - TCP packet with FIN+PSH+URG set
 9.  Large Packet       - single packet > 9000 bytes
 10. HTTP Injection     - SQL/XSS patterns detected in HTTP payload
+11. UDP Flood          - ≥100 UDP packets from same src in 5 s
+12. FIN Scan           - TCP packet with only FIN flag set
+13. HTTP Brute Force   - ≥20 HTTP POST requests from same src in 30 s
 """
 
 from __future__ import annotations
@@ -66,6 +69,8 @@ class IDSEngine:
         self._syn_flood:    dict[str, dict] = defaultdict(lambda: {"count": 0, "ts": 0.0})
         self._icmp_flood:   dict[str, dict] = defaultdict(lambda: {"count": 0, "ts": 0.0})
         self._brute_force:  dict[str, dict] = defaultdict(lambda: {"count": 0, "ts": 0.0})
+        self._udp_flood:    dict[str, dict] = defaultdict(lambda: {"count": 0, "ts": 0.0})
+        self._http_brute:   dict[str, dict] = defaultdict(lambda: {"count": 0, "ts": 0.0})
 
         # ARP table: ip → set of MACs
         self._arp_table:    dict[str, set] = defaultdict(set)
@@ -119,6 +124,17 @@ class IDSEngine:
                     info.get("info", ""),
                 )
 
+            # 12. FIN Scan (FIN-only — no other flags)
+            is_fin_only = flags.get("FIN") and not any(
+                flags.get(f) for f in ("SYN", "ACK", "RST", "PSH", "URG")
+            )
+            if is_fin_only:
+                alerts += self._alert(
+                    f"finscan_{src}_{dst}", now, "HIGH", "FIN Scan", src, dst,
+                    "TCP FIN-only flag set – likely a FIN port scan.",
+                    info.get("info", ""),
+                )
+
             # 5. SYN Flood
             if flags.get("SYN") and not flags.get("ACK"):
                 alerts += self._check_syn_flood(src, dst, now)
@@ -134,6 +150,10 @@ class IDSEngine:
         # 8. UDP port scan (no flags, rapid distinct ports)
         if proto == "UDP" and dst_port is not None:
             alerts += self._check_port_scan(src, dst, dst_port, now)
+
+        # 11. UDP Flood
+        if proto == "UDP":
+            alerts += self._check_udp_flood(src, dst, now)
 
         # 9. ICMP Flood
         if proto == "ICMP":
@@ -152,7 +172,7 @@ class IDSEngine:
                         dns_info,
                     )
 
-        # 11. HTTP Injection
+        # 11. HTTP Injection + HTTP Brute Force
         if proto in ("HTTP", "TCP") and payload:
             try:
                 text = payload.decode("utf-8", errors="ignore")
@@ -168,6 +188,9 @@ class IDSEngine:
                         "Possible XSS pattern detected in HTTP payload.",
                         info.get("info", ""),
                     )
+                # 13. HTTP Brute Force (rapid POST requests)
+                if text.startswith("POST ") and dst_port in (80, 8080, 443, 8443):
+                    alerts += self._check_http_brute(src, dst, dst_port, now)
             except Exception:
                 pass
 
@@ -240,6 +263,36 @@ class IDSEngine:
             )
         return []
 
+    def _check_udp_flood(self, src, dst, now) -> list[IDSAlert]:
+        state = self._udp_flood[src]
+        if now - state["ts"] > 5:
+            state["count"] = 0
+            state["ts"] = now
+        state["count"] += 1
+        if state["count"] >= 100:
+            state["count"] = 0
+            return self._alert(
+                f"udpflood_{src}", now, "HIGH", "UDP Flood", src, dst,
+                f"UDP flood from {src}: ≥100 UDP packets in 5 s.",
+                "",
+            )
+        return []
+
+    def _check_http_brute(self, src, dst, port, now) -> list[IDSAlert]:
+        state = self._http_brute[src]
+        if now - state["ts"] > 30:
+            state["count"] = 0
+            state["ts"] = now
+        state["count"] += 1
+        if state["count"] >= 20:
+            state["count"] = 0
+            return self._alert(
+                f"httpbrute_{src}_{port}", now, "CRITICAL", "HTTP Brute Force", src, dst,
+                f"HTTP brute-force detected from {src}: ≥20 POST requests to port {port} in 30 s.",
+                "",
+            )
+        return []
+
     def _check_arp_spoof(self, info: dict, now: float) -> list[IDSAlert]:
         src_ip = info.get("src_ip", "")
         src_mac = info.get("src_mac", "")
@@ -296,6 +349,8 @@ class IDSEngine:
         self._syn_flood.clear()
         self._icmp_flood.clear()
         self._brute_force.clear()
+        self._udp_flood.clear()
+        self._http_brute.clear()
         self._arp_table.clear()
         self._alerted.clear()
         self._alert_counter = 0

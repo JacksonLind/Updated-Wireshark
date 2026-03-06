@@ -100,6 +100,7 @@ class StatsTab(QWidget):
         super().__init__(parent)
         self._proto_counts: dict[str, int] = defaultdict(int)
         self._src_counts:   dict[str, int] = defaultdict(int)
+        self._dst_counts:   dict[str, int] = defaultdict(int)
         self._alert_counts: dict[str, int] = defaultdict(int)
         self._total         = 0
         self._total_bytes   = 0
@@ -117,8 +118,10 @@ class StatsTab(QWidget):
     def record_packet(self, info: dict) -> None:
         proto = info.get("protocol", "Unknown")
         src   = info.get("src_ip", "—")
+        dst   = info.get("dst_ip", "—")
         self._proto_counts[proto] += 1
         self._src_counts[src]     += 1
+        self._dst_counts[dst]     += 1
         self._total               += 1
         self._total_bytes         += info.get("length", 0)
 
@@ -129,6 +132,7 @@ class StatsTab(QWidget):
     def reset(self) -> None:
         self._proto_counts.clear()
         self._src_counts.clear()
+        self._dst_counts.clear()
         self._alert_counts.clear()
         self._total = 0
         self._total_bytes = 0
@@ -192,6 +196,25 @@ class StatsTab(QWidget):
         talkers_layout.addWidget(self._talkers_table)
         mid.addWidget(talkers_group, 1)
 
+        # Top destinations
+        dest_group = QGroupBox("Top Destinations (Dest IPs)")
+        dest_layout = QVBoxLayout(dest_group)
+        dest_layout.setContentsMargins(4, 8, 4, 4)
+
+        self._dest_table = QTableWidget(0, 3)
+        self._dest_table.setHorizontalHeaderLabels(["IP Address", "Packets", "Share"])
+        self._dest_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._dest_table.setColumnWidth(1, 70)
+        self._dest_table.setColumnWidth(2, 60)
+        self._dest_table.verticalHeader().setVisible(False)
+        self._dest_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._dest_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._dest_table.setAlternatingRowColors(True)
+        self._dest_table.setShowGrid(False)
+        self._dest_table.verticalHeader().setDefaultSectionSize(22)
+        dest_layout.addWidget(self._dest_table)
+        mid.addWidget(dest_group, 1)
+
         main_layout.addLayout(mid)
 
         # ── Alert severity breakdown ────────────────────────────────────────
@@ -248,6 +271,19 @@ class StatsTab(QWidget):
                 if col == 0:
                     item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                 self._talkers_table.setItem(row, col, item)
+
+        # Top destinations
+        top_dst = sorted(self._dst_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        self._dest_table.setRowCount(len(top_dst))
+        for row, (ip, count) in enumerate(top_dst):
+            pct = count / total * 100
+            for col, val in enumerate([ip, str(count), f"{pct:.1f}%"]):
+                item = QTableWidgetItem(val)
+                item.setForeground(QColor("#e0e0e0"))
+                item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+                if col == 0:
+                    item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                self._dest_table.setItem(row, col, item)
 
         # Severity labels
         for sev, lbl in self._sev_labels.items():
