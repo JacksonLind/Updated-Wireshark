@@ -32,6 +32,7 @@ from src.core.capture_engine import CaptureEngine, list_interfaces
 from src.core.ids_engine     import IDSEngine, IDSAlert
 from src.core.connections    import ConnectionTracker
 from src.utils.helpers       import format_timestamp
+from src.utils.resources     import resource_path
 
 
 # ── Qt-safe bridge: capture thread → main thread ─────────────────────────────
@@ -439,7 +440,7 @@ class MainWindow(QMainWindow):
         browser.setOpenExternalLinks(True)
 
         # Load docs/USER_GUIDE.md if available, else inline text
-        guide_path = Path(__file__).parent.parent.parent / "docs" / "USER_GUIDE.md"
+        guide_path = resource_path("docs/USER_GUIDE.md")
         if guide_path.exists():
             browser.setMarkdown(guide_path.read_text(encoding="utf-8"))
         else:

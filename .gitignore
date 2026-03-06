@@ -11,6 +11,11 @@ dist/
 build/
 *.egg
 
+# PyInstaller work directory (build artefacts — not source)
+# The compiled exe goes into dist/ which is already excluded above.
+# The spec file itself (NetGuard.spec) IS committed to the repo.
+*.spec.bak
+
 # Virtual environments
 .venv/
 venv/

@@ -9,7 +9,27 @@ It lets you see every packet flowing across your network, spot suspicious behavi
 
 ## Quick Start
 
-### Windows 11
+### Option A — Standalone Executable (recommended)
+
+> No Python needed on the target machine — just the exe and Npcap.
+
+1. **Install Npcap** from [npcap.com](https://npcap.com/#download).  
+   ✅ During install, tick **"Install Npcap in WinPcap API-compatible Mode"**.
+
+2. **Build the exe** — double-click `build.bat` (requires Python on the **build** machine):
+   ```
+   build.bat
+   ```
+   This produces `dist\NetGuard\NetGuard.exe`.
+
+3. **Run `NetGuard.exe`** — right-click → **Run as Administrator** for packet capture.
+
+4. **Distribute** — copy the entire `dist\NetGuard\` folder to any Windows machine.  
+   The only requirement on the target is Npcap.
+
+### Option B — Run from Source (Python)
+
+#### Windows 11
 
 1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/).  
    ✅ During install, tick **"Add Python to PATH"**.
@@ -36,6 +56,32 @@ It lets you see every packet flowing across your network, spot suspicious behavi
 bash setup.sh          # installs Python dependencies
 sudo python3 main.py   # root required for raw packet capture
 ```
+
+---
+
+## Building the Standalone Executable
+
+### Windows
+
+```bat
+build.bat
+```
+
+The script automatically:
+- Installs **PyInstaller** if not already present
+- Installs all Python dependencies
+- Runs PyInstaller using `NetGuard.spec`
+- Produces `dist\NetGuard\NetGuard.exe`
+
+> **Note:** Npcap cannot be bundled inside the exe. It must be installed separately on the target machine.
+
+### Linux / macOS
+
+```bash
+bash build.sh
+```
+
+Produces `dist/NetGuard/NetGuard`.  Root is required at **runtime**, not during the build.
 
 ---
 

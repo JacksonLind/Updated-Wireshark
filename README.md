@@ -15,15 +15,34 @@
 | **Packet Detail View** | Layer-by-layer breakdown with hex dump |
 | **Built-in IDS** | 11 detection rules: port scans, SYN floods, ARP spoofing, brute force, SQL injection & more |
 | **Live Dashboard** | Real-time statistics, top talkers, protocol distribution, alert breakdown |
-| **Export** | Save captures as CSV or JSON |
+| **Connection Tracker** | Live view of active TCP/UDP flows with state and duration |
+| **Export** | Save captures as CSV, JSON, or PCAP; export alerts to CSV or JSON |
 | **Modern Dark UI** | Clean, minimal interface — no jargon overload |
 | **Cross-platform** | Windows 11 ✅ · Linux ✅ (macOS compatible) |
+| **Standalone Exe** | Build a self-contained `NetGuard.exe` with `build.bat` — no Python required on target |
 
 ---
 
 ## 🚀 Quick Start
 
-### Windows 11
+### Option A — Standalone Executable (recommended for most users)
+
+> No Python installation needed on the target machine.
+
+1. Install **Npcap** from [npcap.com](https://npcap.com/#download)  
+   *(tick "WinPcap API-compatible Mode" during install)*
+2. Double-click **`build.bat`** (or run it from a terminal with Python already installed).  
+   This produces `dist\NetGuard\NetGuard.exe`.
+3. Copy the entire `dist\NetGuard\` folder to any Windows machine.
+4. Run **`NetGuard.exe`** (as Administrator for packet capture).
+
+See [Building the Executable](#%EF%B8%8F-building-the-executable) below for more details.
+
+---
+
+### Option B — Run from Source (Python)
+
+#### Windows 11
 
 1. Install **Python 3.10+** from [python.org](https://www.python.org/downloads/)
    *(tick "Add Python to PATH" during install)*
@@ -40,12 +59,46 @@
    ```
    *(Run as Administrator if capture fails)*
 
-### Linux / macOS
+#### Linux / macOS
 
 ```bash
 bash setup.sh
 sudo python3 main.py
 ```
+
+---
+
+## 🛠️ Building the Executable
+
+### Windows
+
+```bat
+build.bat
+```
+
+The script will:
+1. Verify Python is available (or prompt you to install it)
+2. Auto-install **PyInstaller** if it isn't already installed
+3. Install all Python dependencies from `requirements.txt`
+4. Run PyInstaller using `NetGuard.spec`
+
+**Output:** `dist\NetGuard\NetGuard.exe` (plus supporting DLLs in the same folder)
+
+> ⚠️ **Npcap** must still be installed on the machine that will run the exe — it provides the low-level packet capture driver and cannot be bundled inside an executable.
+
+### Linux / macOS
+
+```bash
+bash build.sh
+```
+
+**Output:** `dist/NetGuard/NetGuard`
+
+> Root / `CAP_NET_RAW` is required at **runtime** for raw packet capture — it is not needed for the build itself.
+
+### Distributing the Exe
+
+Copy the entire `dist\NetGuard\` folder to the target machine.  The folder contains the executable and all required DLLs — no Python installation is needed.  The only external prerequisite is [Npcap](https://npcap.com).
 
 ---
 
@@ -84,8 +137,11 @@ See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for:
 ```
 .
 ├── main.py              ← Entry point
-├── requirements.txt     ← Python dependencies
-├── setup.bat / run.bat  ← Windows launchers (Command Prompt)
+├── NetGuard.spec        ← PyInstaller build specification
+├── build.bat            ← Windows build script → dist\NetGuard\NetGuard.exe
+├── build.sh             ← Linux / macOS build script → dist/NetGuard/NetGuard
+├── requirements.txt     ← Python runtime dependencies
+├── setup.bat / run.bat  ← Windows source-run launchers (Command Prompt)
 ├── run.ps1              ← Windows launcher (PowerShell — use if Smart App Control blocks .bat)
 ├── setup.sh  / run.sh   ← Linux launchers
 ├── samples/
@@ -94,16 +150,19 @@ See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for:
 │   ├── core/
 │   │   ├── capture_engine.py   ← Scapy capture thread
 │   │   ├── ids_engine.py       ← IDS detection engine
-│   │   └── analyzer.py         ← Protocol parser
+│   │   ├── analyzer.py         ← Protocol parser
+│   │   └── connections.py      ← TCP/UDP flow tracker
 │   ├── gui/
 │   │   ├── main_window.py      ← Application window
 │   │   ├── capture_tab.py      ← Live packet table
 │   │   ├── alerts_tab.py       ← IDS alert feed
 │   │   ├── stats_tab.py        ← Statistics dashboard
+│   │   ├── connections_tab.py  ← Live connection / flow view
 │   │   ├── detail_panel.py     ← Packet detail view
 │   │   └── theme.py            ← Dark theme / stylesheet
 │   └── utils/
-│       └── helpers.py          ← Shared utilities
+│       ├── helpers.py          ← Shared utilities
+│       └── resources.py        ← Bundled-resource path helper (PyInstaller-aware)
 └── docs/
     └── USER_GUIDE.md           ← Full documentation
 ```
@@ -117,6 +176,8 @@ See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for:
 - Scapy >= 2.5
 - **Windows only:** [Npcap](https://npcap.com) (for raw packet access)
 - **Linux only:** `sudo` / `CAP_NET_RAW`
+
+> **To build the exe:** additionally requires `pyinstaller >= 6.0` (installed automatically by `build.bat` / `build.sh`).
 
 ---
 
